@@ -1,46 +1,96 @@
-let humanScore = 0;
-let computerScore = 0;
-let computerNumber = 1;
-let computerChoice = "rock";
-let humanCalculate = 0;
-let humanChoice = "rock";
-
-
 function getComputerChoice(){
-    computerNumber = Math.random();
-    if (computerNumber < 0.33) {
-        chomputerChoice = "rock";
+    let z = Math.random();
+    if (z < 0.33){
+        return "rock";
     }
-
-    else if (computerNumber > 0.66) {
-        computerChoice = "paper";
+    else if (z > 0.66){
+        return "scissors";
     }
-
-    else{
-        computerChoice = "scissors";
+    else {
+        return "paper";
     }
 }
 
 function getHumanChoice(){
-    let humanCalculate = parseInt(prompt("Please enter 1 = rock, 2 = scissor, 3 = paper."));
-    if (humanCalculate == 2){
-        humanChoice = "scissors"; 
-    }
-    else if(humanCalculate == 3){
-        humanChoice = "paper";
+    let q = prompt("Rock, paper, scissors");
+    x = q.toLowerCase();
+    return x;
+}
+
+let humanScore = 0;
+let computerScore = 0;
+
+
+function playRound(humanSelection,computerSelection){
+if (humanSelection == computerSelection){
+    return "We tie!";
+}
+
+if (humanSelection =="rock"){
+    if (computerSelection =="scissors")
+    {
+        humanScore = humanScore + 1;
+        return "You win! " + humanSelection +" beats " + computerSelection + "";
     }
 
-    else{
-        humanChoice = "rock";
+
+    if (computerSelection =="paper")
+    {
+        computerScore = computerScore + 1;    
+        return "You lose! " + computerSelection +" beats " + humanSelection + "";
     }
 }
 
-function playRound(humanChoice, computerChoice){
-    let humanCalculate = humanCalculate/3;
+if (humanSelection =="paper"){
+    if (computerSelection =="scissors")
+    {
+        computerScore = computerScore + 1; 
+        return "You lose! " + computerSelection +" beats " + humanSelection + "";
+    }
+
+
+    if (computerSelection =="rock")
+    {
+        humanScore = humanScore + 1;
+        return "You win! " + humanSelection +" beats " + computerSelection + "";
+  
+    }
+    }
+
+if (humanSelection =="scissors"){
+    if (computerSelection =="rock")
+    {
+        computerScore = computerScore + 1; 
+        return "You lose! " + computerSelection +" beats " + humanSelection + "";
+       
+    }
+
+
+    if (computerSelection =="paper")
+    {
+        humanScore = humanScore + 1;   
+        return "You win! " + humanSelection +" beats " + computerSelection + "";
+    
+    }
+}
 }
 
-getComputerChoice();
-getHumanChoice();
+function playGame(){
+    for(i=0; i<5; i = i+1){
+        let humanSelection = getHumanChoice();
+        let computerSelection = getComputerChoice();
+        let result = playRound(humanSelection,computerSelection);
+        console.log(result);
+    }
+}
 
-console.log(computerChoice);
-console.log(humanChoice);
+playGame();
+if(humanScore > computerScore){
+    console.log("You won the match " + humanScore + " " + computerScore + "!");
+}
+else if(humanScore < computerScore){
+    console.log("You lost the match! " + humanScore + " " + computerScore + "");
+}
+else{
+    console.log( "It's a draw. " + humanScore + " " + computerScore + "");
+}
