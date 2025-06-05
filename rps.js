@@ -1,3 +1,14 @@
+document.addEventListener("DOMContentLoaded", () => {
+    const buttons = document.querySelectorAll("button");
+    const textResponse = document.querySelector("#textResponse");
+    const roundResult = document.createElement("p");
+    textResponse.appendChild(roundResult);
+    const roundSummary = document.createElement("p");
+    textResponse.appendChild(roundSummary);
+    const endingText = document.createElement("p");
+    textResponse.appendChild(endingText);
+
+
 function getComputerChoice(){
     let z = Math.random();
     if (z < 0.33){
@@ -11,15 +22,8 @@ function getComputerChoice(){
     }
 }
 
-function getHumanChoice(){
-    let q = prompt("Rock, paper, scissors");
-    x = q.toLowerCase();
-    return x;
-}
-
 let humanScore = 0;
 let computerScore = 0;
-
 
 function playRound(humanSelection,computerSelection){
 if (humanSelection == computerSelection){
@@ -75,22 +79,41 @@ if (humanSelection =="scissors"){
 }
 }
 
+let i = 0;
 function playGame(){
-    for(i=0; i<5; i = i+1){
-        let humanSelection = getHumanChoice();
+        buttons.forEach((button) => {
+        button.addEventListener("click", () => {
+        let humanSelection = button.id;
         let computerSelection = getComputerChoice();
         let result = playRound(humanSelection,computerSelection);
-        console.log(result);
-    }
+        let ending = matchEnd();
+        
+        if(result == "We tie!"){
+            i = i + 1;
+        roundResult.textContent =`${result} ${i}`;
+
+        }
+        
+        roundSummary.textContent =`The score is YOU: ${humanScore} COMPUTER: ${computerScore}`;
+        matchEnd();
+        endingText.textContent = `${ending}`;
+        });
+});
+}
+
+function matchEnd() { 
+    if (humanScore < 5 && computerScore < 5){
+        return "ROUND COMPLETE. CONTINUE UNTIL ONE PLAYER REACHES 5 WINS";}
+    if(humanScore > computerScore && humanScore >= 5){
+    buttons.forEach(button => button.disabled = true);
+    return"You won the match " + humanScore + " to " + computerScore + "! Refresh the page to play again";}
+
+    else if(humanScore < computerScore && computerScore >= 5){
+    buttons.forEach(button => button.disabled = true);
+    return"You lost the match " + humanScore + " to " + computerScore + "! Refresh the page to try again.";}
+
 }
 
 playGame();
-if(humanScore > computerScore){
-    console.log("You won the match " + humanScore + " " + computerScore + "!");
-}
-else if(humanScore < computerScore){
-    console.log("You lost the match! " + humanScore + " " + computerScore + "");
-}
-else{
-    console.log( "It's a draw. " + humanScore + " " + computerScore + "");
-}
+
+});
