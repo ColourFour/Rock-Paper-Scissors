@@ -1,0 +1,297 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+import json
+from pathlib import Path
+
+from .classification import classify_question, classify_question_parts
+from .config import AppConfig
+from .exporters import export_records
+from .image_rendering import render_question_image
+from .mark_schemes import extract_mark_scheme_answers, find_mark_scheme
+from .models import ClassificationResult, PageLayout, QuestionRecord, QuestionSpan
+from .pdf_extract import extract_pdf_layout
+from .question_detection import detect_question_anchor_candidates, detect_question_spans, extract_marks_from_text
+from .review import write_review_file
+
+
+@dataclass(frozen=True)
+class PipelineResult:
+    records: list[QuestionRecord]
+    json_path: Path
+    csv_path: Path
+    review_path: Path
+
+
+def process_batch(config: AppConfig) -> PipelineResult:
+    config.ensure_output_dirs()
+    question_pdfs = sorted(config.input.question_papers_dir.glob("*.pdf"))
+    records: list[QuestionRecord] = []
+    for question_pdf in question_pdfs:
+        records.extend(build_records_for_pdf(question_pdf, config))
+    json_path, csv_path = export_records(records, config)
+    review_path = write_review_file(records, config)
+    return PipelineResult(records, json_path, csv_path, review_path)
+
+
+def process_sample(question_pdf: str | Path, config: AppConfig, mark_scheme_pdf: str | Path | None = None) -> PipelineResult:
+    config.ensure_output_dirs()
+    records = build_records_for_pdf(question_pdf, config, mark_scheme_pdf=mark_scheme_pdf)
+    basename = _safe_basename(Path(question_pdf).stem)
+    json_path, csv_path = export_records(records, config, basename=f"{basename}_sample")
+    review_path = write_review_file(records, config, basename=f"{basename}_sample")
+    return PipelineResult(records, json_path, csv_path, review_path)
+
+
+def build_records_for_pdf(
+    question_pdf: str | Path,
+    config: AppConfig,
+    mark_scheme_pdf: str | Path | None = None,
+) -> list[QuestionRecord]:
+    question_pdf = Path(question_pdf)
+    layouts = extract_pdf_layout(question_pdf, config)
+    spans = detect_question_spans(layouts, question_pdf, config)
+    expected_numbers = [span.question_number for span in spans if span.question_number.isdigit()]
+
+    matched_mark_scheme = Path(mark_scheme_pdf) if mark_scheme_pdf else find_mark_scheme(
+        question_pdf,
+        config.input.mark_schemes_dir,
+        config.input.mappings_dir,
+    )
+    answers: dict[str, str] = {}
+    mark_scheme_flags: list[str] = []
+    if matched_mark_scheme and matched_mark_scheme.exists():
+        try:
+            answers = extract_mark_scheme_answers(matched_mark_scheme, config, expected_numbers)
+        except Exception as exc:
+            mark_scheme_flags.append(f"mark_scheme_extract_failed:{exc.__class__.__name__}")
+    else:
+        mark_scheme_flags.append("unmatched_mark_scheme")
+
+    records: list[QuestionRecord] = []
+    for span in spans:
+        answer_text = answers.get(span.question_number, "")
+        flags = list(span.review_flags)
+        flags.extend(mark_scheme_flags)
+        if matched_mark_scheme and matched_mark_scheme.exists() and not answer_text:
+            flags.append("unmatched_answer")
+
+        render_result = render_question_image(question_pdf, span, layouts, config)
+        question_text = render_result.extracted_text or span.combined_text
+        marks = extract_marks_from_text(question_text)
+        classification = classify_question(question_text, marks, config, context_flags=flags)
+        part_level_topics = classify_question_parts(question_text, span.question_number, config, context_flags=flags)
+        question_topic = _question_topic_from_parts(classification, part_level_topics)
+        flags.extend(question_topic["review_flags"])
+        flags.extend(render_result.review_flags)
+        confidence = _record_confidence(float(question_topic["confidence"]), flags)
+
+        records.append(
+            QuestionRecord(
+                source_pdf=_display_path(question_pdf),
+                paper_name=span.paper_name,
+                question_number=span.question_number,
+                full_question_label=span.full_question_label,
+                screenshot_path=_display_path(render_result.screenshot_path),
+                combined_question_text=question_text,
+                answer_text=answer_text,
+                paper_family=str(question_topic["paper_family"]),
+                question_level_paper_family=str(question_topic["paper_family"]),
+                question_level_topic=str(question_topic["topic"]),
+                question_level_subtopic=str(question_topic["subtopic"]),
+                part_level_topics=part_level_topics,
+                topic=str(question_topic["topic"]),
+                subtopic=str(question_topic["subtopic"]),
+                topic_confidence=str(question_topic["topic_confidence"]),
+                topic_evidence=classification.topic_evidence,
+                secondary_topics=list(question_topic["secondary_topics"]),
+                topic_uncertain=bool(question_topic["topic_uncertain"]),
+                difficulty=classification.difficulty,
+                marks=marks,
+                marks_if_available=marks,
+                page_numbers=span.page_numbers,
+                review_flags=sorted(set(flags)),
+                confidence=confidence,
+                crop_uncertain=render_result.crop_uncertain,
+                crop_debug_paths=render_result.debug_paths,
+                topic_alternatives=classification.alternative_topics,
+            )
+        )
+    _write_pdf_diagnostic(question_pdf, layouts, spans, records, config)
+    _write_topic_debug_report(question_pdf, records, config)
+    return records
+
+
+def _record_confidence(classification_confidence: float, flags: list[str]) -> float:
+    penalty = min(0.45, len(set(flags)) * 0.04)
+    return max(0.05, min(0.98, classification_confidence - penalty))
+
+
+def _question_topic_from_parts(
+    classification: ClassificationResult,
+    part_level_topics: list[dict[str, object]],
+) -> dict[str, object]:
+    review_flags = list(classification.review_flags)
+    secondary_topics = _secondary_main_topics(classification.secondary_topics, classification.topic)
+    topic_confidence = classification.topic_confidence
+    topic_uncertain = classification.topic_uncertain
+    confidence = classification.confidence
+    paper_family = classification.paper_family
+
+    part_topics = [str(part.get("topic", "")) for part in part_level_topics if part.get("topic")]
+    part_families = sorted(
+        {
+            str(part.get("paper_family", ""))
+            for part in part_level_topics
+            if part.get("paper_family") and part.get("paper_family") != "mixed_or_uncertain"
+        }
+    )
+    mixed_part_topics = sorted({topic for topic in part_topics if topic and topic != classification.topic})
+    if mixed_part_topics:
+        secondary_topics = sorted(set(secondary_topics + mixed_part_topics))
+        if topic_confidence == "high":
+            topic_confidence = "medium"
+            confidence = min(confidence, 0.66)
+        review_flags = _clear_resolved_mixed_topic_flags(review_flags)
+        topic_uncertain = _topic_uncertain_from_flags(review_flags)
+
+    if len(part_families) == 1 and paper_family == "mixed_or_uncertain":
+        paper_family = part_families[0]
+    elif len(part_families) > 1:
+        paper_family = "mixed_or_uncertain"
+        review_flags.append("paper_family_uncertain")
+    elif paper_family == "mixed_or_uncertain":
+        review_flags.append("paper_family_uncertain")
+
+    if any(part.get("topic_uncertain") or part.get("topic_confidence") == "low" for part in part_level_topics):
+        review_flags.append("part_topic_uncertain")
+        topic_uncertain = True
+
+    return {
+        "paper_family": paper_family,
+        "topic": classification.topic,
+        "subtopic": classification.subtopic,
+        "topic_confidence": topic_confidence,
+        "topic_uncertain": topic_uncertain,
+        "secondary_topics": secondary_topics,
+        "review_flags": sorted(set(review_flags)),
+        "confidence": confidence,
+    }
+
+
+def _secondary_main_topics(labels: list[str], primary_topic: str) -> list[str]:
+    topics: list[str] = []
+    for label in labels:
+        topic = str(label).split(":", 1)[0]
+        if topic and topic != primary_topic and topic not in topics:
+            topics.append(topic)
+    return topics
+
+
+def _clear_resolved_mixed_topic_flags(flags: list[str]) -> list[str]:
+    cleaned = [flag for flag in flags if flag != "topic_uncertain_mixed_major_topics"]
+    remaining_topic_uncertainty = any(flag.startswith("topic_uncertain_") for flag in cleaned)
+    if not remaining_topic_uncertainty:
+        cleaned = [flag for flag in cleaned if flag != "topic_uncertain"]
+    return cleaned
+
+
+def _topic_uncertain_from_flags(flags: list[str]) -> bool:
+    return "topic_uncertain" in flags or any(flag.startswith("topic_uncertain_") for flag in flags)
+
+
+def _display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(Path.cwd()))
+    except ValueError:
+        return str(path)
+
+
+def _safe_basename(stem: str) -> str:
+    return "".join(char if char.isalnum() or char in "._-" else "_" for char in stem).strip("_") or "paper"
+
+
+def _write_pdf_diagnostic(
+    question_pdf: Path,
+    layouts: list[PageLayout],
+    spans: list[QuestionSpan],
+    records: list[QuestionRecord],
+    config: AppConfig,
+) -> Path:
+    config.ensure_output_dirs()
+    paper_name = _safe_basename(question_pdf.stem)
+    anchors = detect_question_anchor_candidates(layouts, config)
+    uncertain_records = [
+        record
+        for record in records
+        if record.crop_uncertain
+        or any("uncertain" in flag or "contamination" in flag or "sequence_gap" in flag for flag in record.review_flags)
+    ]
+    ocr_pages = [
+        layout.page_number
+        for layout in layouts
+        if layout.text_source == "ocr" or str(layout.extraction_warning or "").startswith("ocr")
+    ]
+    footer_contamination = [
+        record.question_number
+        for record in records
+        if any("header_footer_contamination" in flag or "crop_reaches_page_margin" in flag for flag in record.review_flags)
+    ]
+    payload = {
+        "source_pdf": _display_path(question_pdf),
+        "paper_name": paper_name,
+        "detected_top_level_questions": len(records),
+        "detected_question_numbers": [record.question_number for record in records],
+        "candidate_question_anchors": len(anchors),
+        "accepted_question_anchors": len(spans),
+        "uncertain_splits": len(uncertain_records),
+        "ocr_fallback_pages": len(ocr_pages),
+        "ocr_page_numbers": ocr_pages,
+        "footer_header_contamination_count": len(footer_contamination),
+        "footer_header_contamination_questions": footer_contamination,
+        "crop_uncertain_count": sum(1 for record in records if record.crop_uncertain),
+        "review_flag_counts": _flag_counts(records),
+    }
+    path = config.output.review_dir / f"{paper_name}_diagnostics.json"
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
+
+
+def _flag_counts(records: list[QuestionRecord]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for record in records:
+        for flag in record.review_flags:
+            counts[flag] = counts.get(flag, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _write_topic_debug_report(question_pdf: Path, records: list[QuestionRecord], config: AppConfig) -> Path:
+    config.ensure_output_dirs()
+    paper_name = _safe_basename(question_pdf.stem)
+    payload = {
+        "source_pdf": _display_path(question_pdf),
+        "paper_name": paper_name,
+        "questions": [
+            {
+                "question_number": record.question_number,
+                "text_snippet": record.combined_question_text[:500],
+                "paper_family": record.paper_family,
+                "question_level_paper_family": record.question_level_paper_family or record.paper_family,
+                "question_level_topic": record.question_level_topic or record.topic,
+                "question_level_subtopic": record.question_level_subtopic or record.subtopic,
+                "topic": record.topic,
+                "subtopic": record.subtopic,
+                "topic_confidence": record.topic_confidence,
+                "record_confidence": record.confidence,
+                "topic_uncertain": record.topic_uncertain,
+                "topic_evidence": record.topic_evidence,
+                "secondary_topics": record.secondary_topics,
+                "part_level_topics": record.part_level_topics,
+                "alternative_candidate_topics": record.topic_alternatives if record.topic_confidence != "high" else [],
+            }
+            for record in records
+        ],
+    }
+    path = config.output.review_dir / f"{paper_name}_topic_debug.json"
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path

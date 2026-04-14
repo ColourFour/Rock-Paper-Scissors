@@ -1,0 +1,138 @@
+input:
+  question_papers_dir: input/question_papers
+  mark_schemes_dir: input/mark_schemes
+  mappings_dir: input/mappings
+
+output:
+  images_dir: output/images
+  json_dir: output/json
+  csv_dir: output/csv
+  review_dir: output/review
+  debug_dir: output/debug
+
+paper_families:
+  - P1
+  - P3
+  - P4
+  - P5
+  - P6
+  - mixed_or_uncertain
+
+paper_family_taxonomy:
+  P1:
+    algebra: [quadratics, polynomials, partial_fractions, modulus, inequalities, surds]
+    functions: [composite_functions, inverse_functions, transformations, domain_range]
+    coordinate_geometry: [straight_line, circles]
+    circular_measure: [radians, arc_length_sector_area]
+    trigonometry: [trig_equations, trig_identities, trig_graphs]
+    series: [binomial_expansion_positive_integer, binomial_expansion_fractional_negative]
+    differentiation: [standard_differentiation, tangents_normals, stationary_points, connected_rates]
+    integration: [standard_integration, definite_integration, area_under_curve]
+    numerical_methods: [iteration, estimation_of_roots]
+  P3:
+    algebra: [partial_fractions, modulus]
+    logarithmic_and_exponential_functions: [log_laws, exponential_equations, logarithmic_equations]
+    trigonometry: [trig_substitutions, trig_equations, identities]
+    calculus: [integration_by_parts, integration_by_substitution, partial_fractions_integration, recurrence_by_integration, differential_equations, implicit_differentiation, parametric_differentiation, parametric_integration]
+    vectors: [vector_geometry, lines_vectors]
+    complex_numbers: [argand_diagrams, modulus_argument, roots_of_complex_numbers]
+    series: [binomial_expansion_fractional_negative, maclaurin_series]
+    differential_equations: [separable, first_order_modelling]
+  P4:
+    kinematics: [constant_acceleration, displacement_velocity_acceleration, velocity_time_graphs]
+    dynamics: [newtons_laws, connected_particles, pulleys]
+    forces_and_equilibrium: [resolving_forces, friction, limiting_equilibrium]
+    momentum: [impulse, collisions]
+    work_energy_power: [work, kinetic_potential_energy, power]
+    motion_in_a_circle: [centripetal_force]
+    variable_force: [differential_equation_modelling]
+  P5:
+    data_representation: [tables_charts, histograms, box_plots, cumulative_frequency]
+    permutations_and_combinations: [counting_principles, arrangements, selections]
+    probability: [basic_probability, conditional_probability, independent_events, tree_diagrams]
+    discrete_random_variables: [expectation, variance]
+    binomial_distribution: [direct_binomial, cumulative_binomial]
+    poisson_distribution: [direct_poisson, poisson_modelling]
+    normal_distribution: [standardisation, inverse_normal]
+    sampling_and_estimation: [sample_mean, unbiased_estimators]
+    correlation_and_regression: [product_moment_correlation, least_squares_regression, interpretation]
+  P6:
+    probability: [conditional_probability, bayes]
+    discrete_random_variables: [expectation_variance, generating_or_combining_variables]
+    continuous_random_variables: [density_functions, expectation_variance]
+    normal_distribution: [linear_combinations]
+    central_limit_theorem: [approximation_using_clt]
+    confidence_intervals: [population_mean]
+    hypothesis_testing: [binomial, poisson, normal, paired_or_unpaired_context_if_relevant]
+  mixed_or_uncertain: {}
+
+# Optional overrides. These are deep-merged with built-in method/object/keyword hints.
+classification_hints: {}
+
+difficulty_labels:
+  - easy
+  - average
+  - difficult
+
+detection:
+  max_question_number: 30
+  question_start_max_x: 115
+  min_question_start_y: 65
+  bottom_margin: 45
+  crop_left_margin: 35
+  crop_right_margin: 35
+  crop_top_margin: 45
+  crop_bottom_margin: 40
+  crop_padding: 10
+  min_text_chars_per_page: 25
+  min_question_chars: 20
+  render_dpi: 220
+  stitch_gap_px: 18
+  output_mode: prompt_only
+  anchor_min_confidence: 0.58
+  anchor_left_tolerance: 12
+  anchor_font_size_ratio: 0.85
+  anchor_y_tolerance: 8
+  span_line_y_tolerance: 6
+  continuation_min_text_chars: 8
+  prompt_region_max_gap: 80
+  prompt_graphic_lookahead: 180
+  prompt_graphic_overlap_padding: 24
+  min_crop_height: 24
+  max_crop_height_ratio: 0.82
+
+ocr:
+  enabled: true
+  language: eng
+  dpi: 220
+  min_confidence: 45
+
+naming:
+  image_template: "{paper_name}_q{question_number:02d}.png"
+  json_name: "question_bank.json"
+  csv_name: "question_bank.csv"
+  review_name: "review_items.csv"
+
+classification:
+  enable_openai: false
+  openai_model: gpt-5-mini
+  openai_timeout_seconds: 30
+  uncertainty_threshold: 0.55
+
+topic_pdfs:
+  enable_topic_pdfs: false
+  topic_pdf_output_dir: output/topic_pdfs
+  page_size: A4
+  margin: 42
+  image_max_width: 500
+  caption_font_size: 8
+  section_heading_font_size: 15
+  topic_title_font_size: 22
+
+debug:
+  enabled: false
+  save_rendered_pages: true
+  save_text_boxes: true
+  save_anchor_candidates: true
+  save_proposed_boxes: true
+  save_crop_boxes: true

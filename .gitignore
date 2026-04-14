@@ -1,0 +1,20 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.egg-info/
+
+# Keep local exam PDFs and generated outputs out of git by default.
+input/**/*.pdf
+output/images/*
+output/json/*
+output/csv/*
+output/review/*
+output/debug/*
+output/topic_pdfs/*
+!output/images/.gitkeep
+!output/json/.gitkeep
+!output/csv/.gitkeep
+!output/review/.gitkeep
+!output/debug/.gitkeep
+!output/topic_pdfs/.gitkeep
