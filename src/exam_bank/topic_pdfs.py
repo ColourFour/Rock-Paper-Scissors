@@ -75,7 +75,7 @@ def _valid_questions(records: list[Mapping[str, Any]]) -> tuple[list[TopicPDFQue
     for record in records:
         topic = str(record.get("topic") or record.get("question_level_topic") or "").strip()
         difficulty = str(record.get("difficulty") or "").strip().lower()
-        screenshot_raw = str(record.get("screenshot_path") or "").strip()
+        screenshot_raw = str(record.get("question_image") or record.get("screenshot_path") or "").strip()
         paper_name = str(record.get("paper_name") or "").strip()
         question_number = str(record.get("question_number") or "").strip()
 
@@ -172,7 +172,7 @@ def _write_topic_pdf(
 
     story: list[Any] = [Paragraph(_topic_title(topic), title_style)]
     usable_width = min(doc.width, config.topic_pdfs.image_max_width)
-    usable_height = doc.height - 60
+    usable_height = max(72, doc.height - 90)
     included = 0
 
     for difficulty in SECTION_ORDER:

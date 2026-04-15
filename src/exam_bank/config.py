@@ -5,69 +5,67 @@ from pathlib import Path
 from typing import Any
 
 
-PAPER_FAMILIES = ["P1", "P3", "P4", "P5", "P6", "mixed_or_uncertain"]
+PAPER_FAMILIES = ["P1", "P2", "P3", "P4", "P5", "P6", "unknown"]
 
 DEFAULT_PAPER_FAMILY_TAXONOMY = {
     "P1": {
-        "algebra": ["quadratics", "polynomials", "partial_fractions", "modulus", "inequalities", "surds"],
-        "functions": ["composite_functions", "inverse_functions", "transformations", "domain_range"],
-        "coordinate_geometry": ["straight_line", "circles"],
-        "circular_measure": ["radians", "arc_length_sector_area"],
-        "trigonometry": ["trig_equations", "trig_identities", "trig_graphs"],
-        "series": ["binomial_expansion_positive_integer", "binomial_expansion_fractional_negative"],
-        "differentiation": ["standard_differentiation", "tangents_normals", "stationary_points", "connected_rates"],
-        "integration": ["standard_integration", "definite_integration", "area_under_curve"],
-        "numerical_methods": ["iteration", "estimation_of_roots"],
+        "quadratics": ["general"],
+        "polynomials": ["general"],
+        "partial_fractions": ["general"],
+        "modulus": ["general"],
+        "inequalities": ["general"],
+        "functions": ["general"],
+        "coordinate_geometry": ["general"],
+        "circular_measure": ["general"],
+        "trigonometry": ["general"],
+        "binomial_expansion": ["general"],
+        "differentiation": ["general"],
+        "integration": ["general"],
+        "numerical_methods": ["general"],
+    },
+    "P2": {
+        "logarithmic_and_exponential_functions": ["general"],
+        "trigonometry": ["general"],
+        "differentiation": ["general"],
+        "integration": ["general"],
     },
     "P3": {
-        "algebra": ["partial_fractions", "modulus"],
-        "logarithmic_and_exponential_functions": ["log_laws", "exponential_equations", "logarithmic_equations"],
-        "trigonometry": ["trig_substitutions", "trig_equations", "identities"],
-        "calculus": [
-            "integration_by_parts",
-            "integration_by_substitution",
-            "partial_fractions_integration",
-            "recurrence_by_integration",
-            "differential_equations",
-            "implicit_differentiation",
-            "parametric_differentiation",
-            "parametric_integration",
-        ],
-        "vectors": ["vector_geometry", "lines_vectors"],
-        "complex_numbers": ["argand_diagrams", "modulus_argument", "roots_of_complex_numbers"],
-        "series": ["binomial_expansion_fractional_negative", "maclaurin_series"],
-        "differential_equations": ["separable", "first_order_modelling"],
+        "logarithmic_and_exponential_functions": ["general"],
+        "trigonometry": ["general"],
+        "integration": ["general"],
+        "differentiation": ["general"],
+        "differential_equations": ["general"],
+        "vectors": ["general"],
+        "complex_numbers": ["general"],
+        "series": ["general"],
+        "parametric_equations": ["general"],
     },
     "P4": {
-        "kinematics": ["constant_acceleration", "displacement_velocity_acceleration", "velocity_time_graphs"],
-        "dynamics": ["newtons_laws", "connected_particles", "pulleys"],
-        "forces_and_equilibrium": ["resolving_forces", "friction", "limiting_equilibrium"],
-        "momentum": ["impulse", "collisions"],
-        "work_energy_power": ["work", "kinetic_potential_energy", "power"],
-        "motion_in_a_circle": ["centripetal_force"],
-        "variable_force": ["differential_equation_modelling"],
+        "kinematics": ["general"],
+        "forces_and_equilibrium": ["general"],
+        "connected_particles": ["general"],
+        "momentum_and_impulse": ["general"],
+        "work_energy_power": ["general"],
+        "circular_motion": ["general"],
     },
     "P5": {
-        "data_representation": ["tables_charts", "histograms", "box_plots", "cumulative_frequency"],
-        "permutations_and_combinations": ["counting_principles", "arrangements", "selections"],
-        "probability": ["basic_probability", "conditional_probability", "independent_events", "tree_diagrams"],
-        "discrete_random_variables": ["expectation", "variance"],
-        "binomial_distribution": ["direct_binomial", "cumulative_binomial"],
-        "poisson_distribution": ["direct_poisson", "poisson_modelling"],
-        "normal_distribution": ["standardisation", "inverse_normal"],
-        "sampling_and_estimation": ["sample_mean", "unbiased_estimators"],
-        "correlation_and_regression": ["product_moment_correlation", "least_squares_regression", "interpretation"],
+        "permutations_and_combinations": ["general"],
+        "probability": ["general"],
+        "discrete_random_variables": ["general"],
+        "binomial_distribution": ["general"],
+        "poisson_distribution": ["general"],
+        "normal_distribution": ["general"],
+        "correlation_and_regression": ["general"],
     },
     "P6": {
-        "probability": ["conditional_probability", "bayes"],
-        "discrete_random_variables": ["expectation_variance", "generating_or_combining_variables"],
-        "continuous_random_variables": ["density_functions", "expectation_variance"],
-        "normal_distribution": ["linear_combinations"],
-        "central_limit_theorem": ["approximation_using_clt"],
-        "confidence_intervals": ["population_mean"],
-        "hypothesis_testing": ["binomial", "poisson", "normal", "paired_or_unpaired_context_if_relevant"],
+        "probability": ["general"],
+        "continuous_random_variables": ["general"],
+        "normal_distribution": ["general"],
+        "central_limit_theorem": ["general"],
+        "confidence_intervals": ["general"],
+        "hypothesis_testing": ["general"],
     },
-    "mixed_or_uncertain": {},
+    "unknown": {},
 }
 
 
@@ -78,7 +76,7 @@ def _phrase(label: str) -> str:
 def _flatten_topic_taxonomy(taxonomy: dict[str, dict[str, list[str]]]) -> dict[str, list[str]]:
     flattened: dict[str, list[str]] = {}
     for family, topics in taxonomy.items():
-        if family == "mixed_or_uncertain":
+        if family == "unknown":
             continue
         for topic, subtopics in topics.items():
             flattened.setdefault(topic, [])
@@ -93,7 +91,7 @@ def _auto_classification_hints(
 ) -> dict[str, dict[str, dict[str, dict[str, list[str]]]]]:
     hints: dict[str, dict[str, dict[str, dict[str, list[str]]]]] = {}
     for family, topics in taxonomy.items():
-        if family == "mixed_or_uncertain":
+        if family == "unknown":
             continue
         hints[family] = {}
         for topic, subtopics in topics.items():
@@ -120,20 +118,501 @@ def _deep_merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[st
     return merged
 
 
-MANUAL_CLASSIFICATION_HINTS = {
+CAIE_9709_HINTS = {
+    "paper_family_aliases": {
+        "1": "P1",
+        "3": "P3",
+        "4": "P4",
+        "5": "P5",
+        "paper 1": "P1",
+        "paper 3": "P3",
+        "paper 4": "P4",
+        "paper 5": "P5",
+        "pure mathematics 1": "P1",
+        "pure mathematics 3": "P3",
+        "mechanics": "P4",
+        "probability & statistics 1": "P5",
+        "probability and statistics 1": "P5",
+        "m1": "P4",
+        "s1": "P5",
+    },
+
     "P1": {
-        "algebra": {
-            "quadratics": {"methods": ["solve", "factorise", "complete the square"], "objects": ["quadratic equation", "quadratic"], "keywords": ["discriminant", "roots"]},
-            "polynomials": {"methods": ["factorise", "divide", "show"], "objects": ["polynomial"], "keywords": ["remainder", "factor theorem"]},
-            "partial_fractions": {"methods": ["partial fractions", "express.*partial fractions"], "objects": ["rational function", "proper fraction"], "keywords": ["denominator", "numerator"]},
-            "modulus": {"methods": ["solve", "sketch"], "objects": ["modulus"], "keywords": ["|x|", "absolute value"]},
-            "inequalities": {"methods": ["solve"], "objects": ["inequality"], "keywords": ["<", ">", "<=", ">="]},
-            "surds": {"methods": ["simplify", "rationalise"], "objects": ["surd"], "keywords": ["sqrt", "root"]},
+        "quadratics": {
+            "subtopics": {
+                "solving": {
+                    "methods": ["solve", "find the roots", "factorise", "complete the square"],
+                    "keywords": ["quadratic", "root", "roots", "discriminant", "equal roots", "real roots"],
+                    "anti_keywords": ["log", "ln", "vector", "complex", "probability"],
+                },
+                "discriminant": {
+                    "methods": ["show", "determine", "find"],
+                    "keywords": ["discriminant", "equal roots", "real and distinct", "no real roots"],
+                },
+            },
+        },
+        "polynomials": {
+            "subtopics": {
+                "remainder_factor_theorem": {
+                    "methods": ["find", "show", "determine", "factorise"],
+                    "keywords": ["remainder", "factor theorem", "when f(x) is divided by", "is a factor of"],
+                },
+                "division": {
+                    "methods": ["divide", "express"],
+                    "keywords": ["quotient", "remainder", "divided by"],
+                },
+            },
+        },
+        "partial_fractions": {
+            "subtopics": {
+                "decomposition": {
+                    "methods": ["express in partial fractions", "decompose"],
+                    "keywords": ["partial fractions", "rational function"],
+                },
+            },
+        },
+        "modulus": {
+            "subtopics": {
+                "equations": {
+                    "methods": ["solve"],
+                    "keywords": ["|x|", "modulus", "absolute value"],
+                },
+                "graphs": {
+                    "methods": ["sketch", "draw"],
+                    "keywords": ["|x|", "modulus", "graph"],
+                },
+            },
+        },
+        "inequalities": {
+            "subtopics": {
+                "algebraic": {
+                    "methods": ["solve"],
+                    "keywords": ["inequality", "<", ">", "≤", "≥"],
+                    "anti_keywords": ["probability", "hypothesis"],
+                },
+            },
+        },
+        "functions": {
+            "subtopics": {
+                "composite": {
+                    "methods": ["find", "show"],
+                    "keywords": ["f(g(x))", "g(f(x))", "fg", "gf", "composite"],
+                },
+                "inverse": {
+                    "methods": ["find", "show"],
+                    "keywords": ["inverse", "f^-1", "f^{-1}"],
+                },
+                "transformations": {
+                    "methods": ["sketch", "describe", "write down"],
+                    "keywords": ["translation", "stretch", "reflection", "transformation"],
+                },
+                "domain_range": {
+                    "methods": ["state", "find"],
+                    "keywords": ["domain", "range", "one-one"],
+                },
+            },
+        },
+        "coordinate_geometry": {
+            "subtopics": {
+                "straight_line": {
+                    "methods": ["find the equation", "show that"],
+                    "keywords": ["gradient", "parallel", "perpendicular", "midpoint"],
+                },
+            },
+        },
+        "circular_measure": {
+            "subtopics": {
+                "radians": {
+                    "methods": ["find", "calculate"],
+                    "keywords": ["radian", "θ", "theta"],
+                },
+                "arc_sector": {
+                    "methods": ["find", "calculate"],
+                    "keywords": ["arc length", "sector area", "sector"],
+                },
+            },
+        },
+        "trigonometry": {
+            "subtopics": {
+                "equations": {
+                    "methods": ["solve"],
+                    "keywords": ["sin", "cos", "tan"],
+                },
+                "identities": {
+                    "methods": ["show that", "prove that"],
+                    "keywords": ["identity", "sin", "cos", "tan"],
+                },
+                "graphs": {
+                    "methods": ["sketch", "draw"],
+                    "keywords": ["amplitude", "period", "trigonometric graph", "sin", "cos", "tan"],
+                },
+            },
+        },
+        "binomial_expansion": {
+            "subtopics": {
+                "positive_integer": {
+                    "methods": ["expand"],
+                    "keywords": ["binomial", "positive integer power"],
+                },
+                "fractional_negative": {
+                    "methods": ["expand", "approximate"],
+                    "keywords": ["ascending powers", "valid for", "fractional power", "negative power"],
+                },
+            },
+        },
+        "differentiation": {
+            "subtopics": {
+                "standard": {
+                    "methods": ["differentiate", "find dy/dx"],
+                    "keywords": ["dy/dx", "derivative"],
+                },
+                "tangents_normals": {
+                    "methods": ["find the equation"],
+                    "keywords": ["tangent", "normal", "gradient"],
+                },
+                "stationary_points": {
+                    "methods": ["find", "determine"],
+                    "keywords": ["stationary point", "maximum", "minimum"],
+                },
+            },
+        },
+        "integration": {
+            "subtopics": {
+                "standard": {
+                    "methods": ["integrate"],
+                    "keywords": ["integral", "constant of integration"],
+                },
+                "definite": {
+                    "methods": ["evaluate", "integrate"],
+                    "keywords": ["limits", "definite integral"],
+                },
+                "area_under_curve": {
+                    "methods": ["find the area", "calculate the area"],
+                    "keywords": ["area under the curve", "bounded by the curve"],
+                },
+            },
+        },
+        "numerical_methods": {
+            "subtopics": {
+                "change_of_sign": {
+                    "methods": ["show", "verify"],
+                    "keywords": ["root between", "change of sign"],
+                },
+                "iteration": {
+                    "methods": ["use the iterative formula", "iterate"],
+                    "keywords": ["x_(n+1)", "x_{n+1}", "recurrence relation"],
+                },
+            },
+        },
+    },
+
+    "P2": {
+        # Legacy / route-specific pure paper. Keep narrower than P3.
+        "logarithmic_and_exponential_functions": {
+            "subtopics": {
+                "log_laws": {
+                    "methods": ["simplify", "show that"],
+                    "keywords": ["log", "ln"],
+                },
+                "equations": {
+                    "methods": ["solve"],
+                    "keywords": ["log", "ln", "e^", "exponential"],
+                },
+            },
+        },
+        "trigonometry": {
+            "subtopics": {
+                "equations": {"methods": ["solve"], "keywords": ["sin", "cos", "tan"]},
+                "identities": {"methods": ["show that", "prove that"], "keywords": ["identity", "sec", "cosec", "cot"]},
+            },
+        },
+        "differentiation": {
+            "subtopics": {
+                "stationary_points": {"methods": ["find"], "keywords": ["stationary point", "maximum", "minimum"]},
+            },
+        },
+        "integration": {
+            "subtopics": {
+                "standard": {"methods": ["integrate"], "keywords": ["integral"]},
+                "area_under_curve": {"methods": ["find the area"], "keywords": ["area under the curve"]},
+            },
+        },
+    },
+
+    "P3": {
+        "logarithmic_and_exponential_functions": {
+            "subtopics": {
+                "log_laws": {"methods": ["simplify", "show that"], "keywords": ["log", "ln"]},
+                "equations": {"methods": ["solve"], "keywords": ["log", "ln", "e^", "exponential"]},
+            },
+        },
+        "trigonometry": {
+            "subtopics": {
+                "equations": {"methods": ["solve"], "keywords": ["sin", "cos", "tan", "sec", "cosec", "cot"]},
+                "identities": {"methods": ["show that", "prove that"], "keywords": ["identity", "sec", "cosec", "cot"]},
+            },
+        },
+        "integration": {
+            "subtopics": {
+                "by_parts": {
+                    "methods": ["integrate", "use integration by parts"],
+                    "keywords": ["by parts", "x e^", "x sin", "x cos", "x sec^2", "ln x"],
+                },
+                "by_substitution": {
+                    "methods": ["integrate", "use the substitution"],
+                    "keywords": ["substitution", "u =", "hence integrate"],
+                },
+                "partial_fractions": {
+                    "methods": ["integrate"],
+                    "keywords": ["partial fractions", "rational function"],
+                },
+                "recurrence": {
+                    "methods": ["show that", "prove that"],
+                    "keywords": ["I_n", "I_{n+1}", "reduction formula", "recurrence relation"],
+                },
+            },
+        },
+        "differentiation": {
+            "subtopics": {
+                "implicit": {
+                    "methods": ["differentiate", "find dy/dx"],
+                    "keywords": ["implicitly", "dy/dx"],
+                },
+                "parametric": {
+                    "methods": ["find dy/dx", "find the equation of the tangent"],
+                    "keywords": ["x =", "y =", "parameter", "dx/dt", "dy/dt"],
+                },
+            },
+        },
+        "parametric_equations": {
+            "subtopics": {
+                "area_or_length_style": {
+                    "methods": ["find the area", "find the coordinates", "find the tangent"],
+                    "keywords": ["parameter", "dx/dt", "dy/dt", "parametric"],
+                },
+            },
+        },
+        "differential_equations": {
+            "subtopics": {
+                "separable": {
+                    "methods": ["solve", "separate variables"],
+                    "keywords": ["dy/dx", "given that", "when x =", "when y ="],
+                },
+                "modelling": {
+                    "methods": ["form", "solve"],
+                    "keywords": ["rate of change", "differential equation"],
+                },
+            },
+        },
+        "vectors": {
+            "subtopics": {
+                "geometry": {
+                    "methods": ["show that", "find", "determine"],
+                    "keywords": ["position vector", "parallel", "perpendicular", "midpoint", "ratio"],
+                },
+                "vector_equations": {
+                    "methods": ["find", "show that"],
+                    "keywords": ["r =", "vector equation", "line", "scalar product"],
+                },
+            },
+        },
+        "complex_numbers": {
+            "subtopics": {
+                "argand": {
+                    "methods": ["represent", "sketch"],
+                    "keywords": ["argand", "complex plane"],
+                },
+                "modulus_argument": {
+                    "methods": ["find", "calculate"],
+                    "keywords": ["|z|", "arg z", "argument", "modulus"],
+                },
+                "roots": {
+                    "methods": ["solve", "find the roots"],
+                    "keywords": ["complex roots", "root of the equation", "z"],
+                },
+                "loci": {
+                    "methods": ["describe", "sketch"],
+                    "keywords": ["locus", "|z-a|", "arg"],
+                },
+            },
+        },
+        "series": {
+            "subtopics": {
+                "binomial_fractional_negative": {
+                    "methods": ["expand", "approximate"],
+                    "keywords": ["ascending powers", "valid for", "fractional power", "negative power"],
+                },
+                "maclaurin": {
+                    "methods": ["expand", "obtain the first terms"],
+                    "keywords": ["maclaurin", "series in ascending powers of x"],
+                },
+            },
+        },
+    },
+
+    "P4": {
+        "kinematics": {
+            "subtopics": {
+                "constant_acceleration": {
+                    "methods": ["find", "calculate"],
+                    "keywords": ["u", "v", "a", "s", "t", "constant acceleration"],
+                },
+                "variable_acceleration": {
+                    "methods": ["differentiate", "integrate", "find"],
+                    "keywords": ["displacement", "velocity", "acceleration", "particle"],
+                },
+            },
+        },
+        "forces_and_equilibrium": {
+            "subtopics": {
+                "resolving_forces": {
+                    "methods": ["resolve", "find"],
+                    "keywords": ["component", "inclined plane", "equilibrium"],
+                },
+                "friction": {
+                    "methods": ["find", "calculate"],
+                    "keywords": ["friction", "coefficient of friction", "limiting equilibrium", "about to move"],
+                },
+            },
+        },
+        "connected_particles": {
+            "subtopics": {
+                "tension_systems": {
+                    "methods": ["find", "calculate"],
+                    "keywords": ["connected particles", "string", "tension", "pulley"],
+                },
+            },
+        },
+        "momentum_and_impulse": {
+            "subtopics": {
+                "impulse": {
+                    "methods": ["find", "calculate"],
+                    "keywords": ["impulse", "momentum"],
+                },
+                "collisions": {
+                    "methods": ["find", "calculate"],
+                    "keywords": ["collision", "coefficient of restitution", "impact"],
+                },
+            },
+        },
+        "work_energy_power": {
+            "subtopics": {
+                "work_energy": {
+                    "methods": ["find", "calculate", "use conservation of energy"],
+                    "keywords": ["work", "kinetic energy", "potential energy", "loss in gravitational potential energy"],
+                },
+                "power": {
+                    "methods": ["find", "calculate"],
+                    "keywords": ["power", "rate of working"],
+                },
+            },
+        },
+        "circular_motion": {
+            "subtopics": {
+                "centripetal_force": {
+                    "methods": ["find", "calculate"],
+                    "keywords": ["circular motion", "centripetal", "speed at the lowest point", "tension"],
+                },
+            },
+        },
+    },
+
+    "P5": {
+        "permutations_and_combinations": {
+            "subtopics": {
+                "arrangements": {
+                    "methods": ["find", "calculate"],
+                    "keywords": ["arrangements", "different ways", "letters", "digits"],
+                },
+                "selections": {
+                    "methods": ["find", "calculate"],
+                    "keywords": ["committee", "choose", "selection"],
+                },
+            },
+        },
+        "probability": {
+            "subtopics": {
+                "basic": {"methods": ["find", "calculate"], "keywords": ["P(", "probability"]},
+                "conditional": {"methods": ["find", "calculate"], "keywords": ["given that", "conditional probability"]},
+                "tree_diagrams": {"methods": ["draw", "use"], "keywords": ["tree diagram", "branch"]},
+            },
+        },
+        "discrete_random_variables": {
+            "subtopics": {
+                "expectation_variance": {
+                    "methods": ["find", "calculate"],
+                    "keywords": ["E(X)", "Var(X)", "random variable"],
+                },
+            },
+        },
+        "binomial_distribution": {
+            "subtopics": {
+                "direct": {"methods": ["find", "calculate"], "keywords": ["X ~ B", "Bin", "binomial distribution"]},
+                "cumulative": {"methods": ["find", "calculate"], "keywords": ["at least", "at most", "more than", "fewer than"]},
+            },
+        },
+        "poisson_distribution": {
+            "subtopics": {
+                "direct": {"methods": ["find", "calculate"], "keywords": ["Poisson", "X ~ Po", "mean rate"]},
+            },
+        },
+        "normal_distribution": {
+            "subtopics": {
+                "standardisation": {
+                    "methods": ["find", "calculate"],
+                    "keywords": ["normal distribution", "standard deviation", "standardise", "z-value"],
+                },
+                "inverse": {
+                    "methods": ["find"],
+                    "keywords": ["percentage point", "find the value of k", "upper tail", "lower tail"],
+                },
+            },
+        },
+        "correlation_and_regression": {
+            "subtopics": {
+                "pmcc": {
+                    "methods": ["calculate", "find"],
+                    "keywords": ["product moment correlation coefficient", "PMCC"],
+                },
+                "regression": {
+                    "methods": ["find", "estimate"],
+                    "keywords": ["least squares regression line", "regression line of y on x"],
+                },
+                "interpretation": {
+                    "methods": ["comment", "interpret"],
+                    "keywords": ["correlation", "regression", "outlier"],
+                },
+            },
+        },
+    }
+}
+
+# Active classifier hints use the same family -> topic -> subtopic shape as
+# DEFAULT_PAPER_FAMILY_TAXONOMY. CAIE_9709_HINTS above is kept as a broader
+# note bank, but this is the structure consumed by classification.py.
+CAIE_CLASSIFICATION_HINTS = {
+    "P1": {
+        "quadratics": {
+            "solving": {"methods": ["solve", "factorise", "complete the square"], "objects": ["quadratic equation", "quadratic"], "keywords": ["discriminant", "roots"]},
+            "discriminant": {"methods": ["find", "show"], "objects": ["discriminant"], "keywords": ["real roots", "equal roots"]},
+        },
+        "polynomials": {
+            "factor_theorem": {"methods": ["factor theorem", "show"], "objects": ["polynomial"], "keywords": ["factor"]},
+            "remainder_theorem": {"methods": ["remainder theorem", "find"], "objects": ["polynomial"], "keywords": ["remainder"]},
+            "division": {"methods": ["divide"], "objects": ["polynomial"], "keywords": ["quotient"]},
+        },
+        "partial_fractions": {
+            "decomposition": {"methods": ["partial fractions", "express.*partial fractions"], "objects": ["rational function", "proper fraction"], "keywords": ["denominator", "numerator"]},
+        },
+        "modulus": {
+            "equations": {"methods": ["solve"], "objects": ["modulus"], "keywords": ["|x|", "absolute value"]},
+            "inequalities": {"methods": ["solve"], "objects": ["modulus inequality"], "keywords": ["|x|", "<", ">"]},
+            "graphs": {"methods": ["sketch"], "objects": ["modulus graph"], "keywords": ["|x|"]},
         },
         "functions": {
             "composite_functions": {"methods": ["find", "show"], "objects": ["composite function"], "keywords": ["fg", "gf", "f(g", "g(f"]},
             "inverse_functions": {"methods": ["find"], "objects": ["inverse function"], "keywords": ["inverse", "f^{-1}"]},
-            "transformations": {"methods": ["sketch", "transform", "describe"], "objects": ["function"], "keywords": ["translation", "stretch", "reflection"]},
+            "transformations": {"methods": ["sketch", "describe"], "objects": ["transformation"], "keywords": ["translation", "stretch", "reflection"]},
             "domain_range": {"methods": ["state", "find"], "objects": ["domain", "range"], "keywords": ["one-one"]},
         },
         "coordinate_geometry": {
@@ -141,23 +620,23 @@ MANUAL_CLASSIFICATION_HINTS = {
             "circles": {"methods": ["find the equation", "show"], "objects": ["circle", "radius", "centre"], "keywords": ["diameter", "tangent"]},
         },
         "circular_measure": {
-            "radians": {"methods": ["find", "calculate"], "objects": ["radian"], "keywords": ["theta"]},
+            "radians": {"methods": ["find", "calculate"], "objects": ["radian", "angle"], "keywords": ["theta"]},
             "arc_length_sector_area": {"methods": ["find", "calculate"], "objects": ["arc", "sector"], "keywords": ["arc length", "sector area"]},
         },
         "trigonometry": {
             "trig_equations": {"methods": ["solve"], "objects": ["trigonometric equation"], "keywords": ["sin", "cos", "tan"]},
             "trig_identities": {"methods": ["prove", "show"], "objects": ["identity"], "keywords": ["sin", "cos", "tan"]},
-            "trig_graphs": {"methods": ["sketch", "draw"], "objects": ["trig graph"], "keywords": ["sin", "cos", "tan"]},
+            "trig_graphs": {"methods": ["sketch", "draw"], "objects": ["trig graph"], "keywords": ["period", "amplitude"]},
         },
-        "series": {
-            "binomial_expansion_positive_integer": {"methods": ["expand"], "objects": ["binomial"], "keywords": ["ascending powers", "positive integer"]},
-            "binomial_expansion_fractional_negative": {"methods": ["expand", "approximate"], "objects": ["negative power", "fractional power"], "keywords": ["ascending powers", "valid for"]},
+        "binomial_expansion": {
+            "positive_integer": {"methods": ["expand"], "objects": ["binomial"], "keywords": ["ascending powers", "positive integer"]},
+            "fractional_negative": {"methods": ["expand", "approximate"], "objects": ["negative power", "fractional power"], "keywords": ["ascending powers", "valid for"]},
+            "approximation": {"methods": ["approximate", "estimate"], "objects": ["binomial expansion"], "keywords": ["valid for"]},
         },
         "differentiation": {
             "standard_differentiation": {"methods": ["differentiate", "find dy/dx"], "objects": ["derivative"], "keywords": ["gradient"]},
             "tangents_normals": {"methods": ["find the equation"], "objects": ["tangent", "normal"], "keywords": ["gradient"]},
             "stationary_points": {"methods": ["find", "determine"], "objects": ["stationary point"], "keywords": ["maximum", "minimum"]},
-            "connected_rates": {"methods": ["differentiate"], "objects": ["rate of change"], "keywords": ["connected rates"]},
         },
         "integration": {
             "standard_integration": {"methods": ["integrate", "find the integral"], "objects": ["integral"], "keywords": ["constant of integration"]},
@@ -169,10 +648,28 @@ MANUAL_CLASSIFICATION_HINTS = {
             "estimation_of_roots": {"methods": ["estimate", "find"], "objects": ["root"], "keywords": ["change of sign"]},
         },
     },
+    "P2": {
+        "logarithmic_and_exponential_functions": {
+            "log_laws": {"methods": ["simplify", "show"], "objects": ["logarithm"], "keywords": ["log", "ln"]},
+            "exponential_equations": {"methods": ["solve"], "objects": ["exponential equation"], "keywords": ["e^", "exp"]},
+            "logarithmic_equations": {"methods": ["solve"], "objects": ["logarithmic equation"], "keywords": ["log", "ln"]},
+        },
+        "trigonometry": {
+            "trig_equations": {"methods": ["solve"], "objects": ["trigonometric equation"], "keywords": ["sin", "cos", "tan"]},
+            "trig_identities": {"methods": ["prove", "show"], "objects": ["identity"], "keywords": ["sin", "cos", "tan"]},
+        },
+        "differentiation": {
+            "standard_differentiation": {"methods": ["differentiate", "find dy/dx"], "objects": ["derivative"], "keywords": ["gradient"]},
+            "stationary_points": {"methods": ["find"], "objects": ["stationary point"], "keywords": ["maximum", "minimum"]},
+        },
+        "integration": {
+            "standard_integration": {"methods": ["integrate"], "objects": ["integral"], "keywords": []},
+            "area_under_curve": {"methods": ["find the area"], "objects": ["curve"], "keywords": ["area under"]},
+        },
+    },
     "P3": {
-        "algebra": {
-            "partial_fractions": {"methods": ["partial fractions", "express.*partial fractions"], "objects": ["rational function"], "keywords": ["denominator", "numerator"]},
-            "modulus": {"methods": ["solve", "sketch"], "objects": ["modulus"], "keywords": ["|x|"]},
+        "partial_fractions": {
+            "decomposition": {"methods": ["partial fractions", "express.*partial fractions"], "objects": ["rational function"], "keywords": ["denominator", "numerator"]},
         },
         "logarithmic_and_exponential_functions": {
             "log_laws": {"methods": ["simplify", "show"], "objects": ["logarithm"], "keywords": ["log", "ln"]},
@@ -180,19 +677,22 @@ MANUAL_CLASSIFICATION_HINTS = {
             "logarithmic_equations": {"methods": ["solve"], "objects": ["logarithmic equation"], "keywords": ["log", "ln"]},
         },
         "trigonometry": {
-            "trig_substitutions": {"methods": ["substitution"], "objects": ["trigonometric"], "keywords": ["sin", "cos", "tan"]},
+            "trig_substitutions": {"methods": ["substitution"], "objects": ["trigonometric"], "keywords": ["sec", "cosec", "cot"]},
             "trig_equations": {"methods": ["solve"], "objects": ["trigonometric equation"], "keywords": ["sin", "cos", "tan"]},
             "identities": {"methods": ["prove", "show"], "objects": ["identity"], "keywords": ["sec", "cosec", "cot"]},
         },
-        "calculus": {
-            "integration_by_parts": {"methods": ["integration by parts", "integrate"], "objects": ["x sec", "x sin", "x cos", "x e", "product requiring parts"], "keywords": ["sec^2", "ln"]},
-            "integration_by_substitution": {"methods": ["substitution", "using the substitution"], "objects": ["integral"], "keywords": ["u ="]},
-            "partial_fractions_integration": {"methods": ["integrate"], "objects": ["partial fractions"], "keywords": ["rational function"]},
-            "recurrence_by_integration": {"methods": ["show", "prove"], "objects": ["recurrence relation", "integral"], "keywords": ["I_n", "I_{n+1}"]},
-            "differential_equations": {"methods": ["solve", "form"], "objects": ["differential equation"], "keywords": ["dy/dx"]},
-            "implicit_differentiation": {"methods": ["differentiate", "find dy/dx"], "objects": ["implicit"], "keywords": ["implicitly"]},
-            "parametric_differentiation": {"methods": ["differentiate", "find dy/dx"], "objects": ["parametric"], "keywords": ["dx/dt", "dy/dt"]},
-            "parametric_integration": {"methods": ["integrate"], "objects": ["parametric"], "keywords": ["dx/dt"]},
+        "integration_by_parts": {
+            "product_integrals": {"methods": ["integration by parts", "integrate"], "objects": ["x sec", "x sin", "x cos", "x e", "product requiring parts"], "keywords": ["sec^2", "ln"]},
+        },
+        "integration_by_substitution": {
+            "substitution": {"methods": ["substitution", "using the substitution"], "objects": ["integral"], "keywords": ["u ="]},
+        },
+        "partial_fractions_integration": {
+            "rational_integrals": {"methods": ["integrate"], "objects": ["partial fractions", "rational function"], "keywords": ["denominator"]},
+        },
+        "differential_equations": {
+            "separable": {"methods": ["separate variables", "solve"], "objects": ["differential equation"], "keywords": ["dy/dx"]},
+            "first_order_modelling": {"methods": ["model", "form", "solve"], "objects": ["differential equation"], "keywords": ["rate of change"]},
         },
         "vectors": {
             "vector_geometry": {"methods": ["prove", "show", "find"], "objects": ["vector"], "keywords": ["parallel", "perpendicular"]},
@@ -203,13 +703,16 @@ MANUAL_CLASSIFICATION_HINTS = {
             "modulus_argument": {"methods": ["find", "calculate"], "objects": ["modulus", "argument"], "keywords": ["arg", "|z|"]},
             "roots_of_complex_numbers": {"methods": ["solve", "find the roots"], "objects": ["complex roots"], "keywords": ["z"]},
         },
-        "series": {
-            "binomial_expansion_fractional_negative": {"methods": ["expand", "approximate"], "objects": ["negative power", "fractional power"], "keywords": ["ascending powers", "valid for"]},
-            "maclaurin_series": {"methods": ["expand", "find"], "objects": ["maclaurin series"], "keywords": ["powers of x"]},
+        "maclaurin_series": {
+            "standard_series": {"methods": ["expand", "find"], "objects": ["maclaurin series"], "keywords": ["powers of x"]},
+            "approximations": {"methods": ["approximate"], "objects": ["maclaurin series"], "keywords": ["powers of x"]},
         },
-        "differential_equations": {
-            "separable": {"methods": ["separate variables", "solve"], "objects": ["differential equation"], "keywords": ["dy/dx"]},
-            "first_order_modelling": {"methods": ["model", "form", "solve"], "objects": ["differential equation"], "keywords": ["rate of change"]},
+        "parametric_equations": {
+            "differentiation": {"methods": ["differentiate", "find dy/dx"], "objects": ["parametric"], "keywords": ["dx/dt", "dy/dt"]},
+            "integration": {"methods": ["integrate"], "objects": ["parametric"], "keywords": ["dx/dt"]},
+        },
+        "implicit_differentiation": {
+            "implicit_curves": {"methods": ["differentiate", "find dy/dx"], "objects": ["implicit"], "keywords": ["implicitly"]},
         },
     },
     "P4": {
@@ -218,26 +721,34 @@ MANUAL_CLASSIFICATION_HINTS = {
             "displacement_velocity_acceleration": {"methods": ["differentiate", "integrate", "find"], "objects": ["displacement", "velocity", "acceleration"], "keywords": ["particle"]},
             "velocity_time_graphs": {"methods": ["sketch", "find"], "objects": ["velocity-time graph"], "keywords": ["area under"]},
         },
-        "dynamics": {
-            "newtons_laws": {"methods": ["apply", "find"], "objects": ["force", "acceleration"], "keywords": ["newton's second law", "f = ma"]},
-            "connected_particles": {"methods": ["find", "calculate"], "objects": ["connected particles"], "keywords": ["tension", "pulley"]},
-            "pulleys": {"methods": ["find", "calculate"], "objects": ["pulley"], "keywords": ["tension"]},
-        },
         "forces_and_equilibrium": {
             "resolving_forces": {"methods": ["resolve", "find"], "objects": ["force"], "keywords": ["component"]},
             "friction": {"methods": ["find", "calculate"], "objects": ["friction"], "keywords": ["coefficient of friction"]},
             "limiting_equilibrium": {"methods": ["find", "calculate"], "objects": ["limiting equilibrium"], "keywords": ["about to move"]},
         },
+        "connected_particles": {
+            "strings": {"methods": ["find", "calculate"], "objects": ["connected particles", "string"], "keywords": ["tension", "pulley"]},
+            "pulleys": {"methods": ["find", "calculate"], "objects": ["pulley"], "keywords": ["tension"]},
+            "tension": {"methods": ["find", "calculate"], "objects": ["tension"], "keywords": ["string", "pulley"]},
+        },
+        "friction": {
+            "coefficient_of_friction": {"methods": ["find", "calculate"], "objects": ["friction"], "keywords": ["coefficient of friction"]},
+            "limiting_friction": {"methods": ["find"], "objects": ["limiting friction"], "keywords": ["about to move"]},
+        },
         "momentum": {
             "impulse": {"methods": ["find", "calculate"], "objects": ["impulse"], "keywords": ["momentum"]},
             "collisions": {"methods": ["find", "calculate"], "objects": ["collision"], "keywords": ["coefficient of restitution"]},
+        },
+        "collisions": {
+            "conservation_of_momentum": {"methods": ["find", "calculate"], "objects": ["collision"], "keywords": ["momentum"]},
+            "coefficient_of_restitution": {"methods": ["find", "calculate"], "objects": ["coefficient of restitution"], "keywords": ["collision"]},
         },
         "work_energy_power": {
             "work": {"methods": ["find", "calculate"], "objects": ["work"], "keywords": ["force times distance"]},
             "kinetic_potential_energy": {"methods": ["find", "calculate"], "objects": ["kinetic energy", "potential energy"], "keywords": ["energy"]},
             "power": {"methods": ["find", "calculate"], "objects": ["power"], "keywords": ["rate of working"]},
         },
-        "motion_in_a_circle": {
+        "circular_motion": {
             "centripetal_force": {"methods": ["find", "calculate"], "objects": ["centripetal force"], "keywords": ["circular motion"]},
         },
         "variable_force": {
@@ -245,26 +756,11 @@ MANUAL_CLASSIFICATION_HINTS = {
         },
     },
     "P5": {
-        "data_representation": {
-            "tables_charts": {"methods": ["interpret", "draw"], "objects": ["table", "chart"], "keywords": ["frequency"]},
-            "histograms": {"methods": ["draw", "find"], "objects": ["histogram"], "keywords": ["frequency density"]},
-            "box_plots": {"methods": ["draw", "interpret"], "objects": ["box plot"], "keywords": ["quartile", "median"]},
-            "cumulative_frequency": {"methods": ["draw", "estimate"], "objects": ["cumulative frequency"], "keywords": ["percentile"]},
-        },
-        "permutations_and_combinations": {
-            "counting_principles": {"methods": ["count", "find"], "objects": ["arrangements"], "keywords": ["ways"]},
-            "arrangements": {"methods": ["arrange"], "objects": ["permutation"], "keywords": ["letters"]},
-            "selections": {"methods": ["select", "choose"], "objects": ["combination"], "keywords": ["committee"]},
-        },
         "probability": {
             "basic_probability": {"methods": ["find", "calculate"], "objects": ["probability"], "keywords": ["P("]},
             "conditional_probability": {"methods": ["find", "calculate"], "objects": ["conditional probability"], "keywords": ["given that"]},
             "independent_events": {"methods": ["show", "find"], "objects": ["independent events"], "keywords": ["independent"]},
             "tree_diagrams": {"methods": ["draw", "use"], "objects": ["tree diagram"], "keywords": ["branch"]},
-        },
-        "discrete_random_variables": {
-            "expectation": {"methods": ["find", "calculate"], "objects": ["expected value"], "keywords": ["E("]},
-            "variance": {"methods": ["find", "calculate"], "objects": ["variance"], "keywords": ["Var"]},
         },
         "binomial_distribution": {
             "direct_binomial": {"methods": ["find", "calculate"], "objects": ["binomial distribution"], "keywords": ["X ~ B", "Bin"]},
@@ -278,10 +774,6 @@ MANUAL_CLASSIFICATION_HINTS = {
             "standardisation": {"methods": ["find", "calculate"], "objects": ["normal distribution"], "keywords": ["standardise", "standard deviation"]},
             "inverse_normal": {"methods": ["find"], "objects": ["normal distribution"], "keywords": ["inverse normal", "percentage point"]},
         },
-        "sampling_and_estimation": {
-            "sample_mean": {"methods": ["find", "calculate"], "objects": ["sample mean"], "keywords": ["sample"]},
-            "unbiased_estimators": {"methods": ["show", "find"], "objects": ["unbiased estimator"], "keywords": ["estimator"]},
-        },
         "correlation_and_regression": {
             "product_moment_correlation": {"methods": ["find", "calculate"], "objects": ["correlation"], "keywords": ["product moment"]},
             "least_squares_regression": {"methods": ["find", "calculate"], "objects": ["regression line"], "keywords": ["least squares"]},
@@ -289,23 +781,9 @@ MANUAL_CLASSIFICATION_HINTS = {
         },
     },
     "P6": {
-        "probability": {
-            "conditional_probability": {"methods": ["find", "calculate"], "objects": ["conditional probability"], "keywords": ["given that"]},
-            "bayes": {"methods": ["use", "find"], "objects": ["Bayes"], "keywords": ["posterior"]},
-        },
-        "discrete_random_variables": {
-            "expectation_variance": {"methods": ["find", "calculate"], "objects": ["expectation", "variance"], "keywords": ["E(", "Var"]},
-            "generating_or_combining_variables": {"methods": ["find", "derive"], "objects": ["random variables"], "keywords": ["independent"]},
-        },
         "continuous_random_variables": {
-            "density_functions": {"methods": ["find", "show"], "objects": ["probability density function"], "keywords": ["pdf", "density"]},
+            "density_functions": {"methods": ["find", "show"], "objects": ["probability density function"], "keywords": ["density"]},
             "expectation_variance": {"methods": ["find", "calculate"], "objects": ["expectation", "variance"], "keywords": ["integral"]},
-        },
-        "normal_distribution": {
-            "linear_combinations": {"methods": ["find", "calculate"], "objects": ["linear combination"], "keywords": ["normal distribution"]},
-        },
-        "central_limit_theorem": {
-            "approximation_using_clt": {"methods": ["approximate", "find"], "objects": ["central limit theorem"], "keywords": ["large sample"]},
         },
         "confidence_intervals": {
             "population_mean": {"methods": ["find", "construct"], "objects": ["confidence interval"], "keywords": ["population mean"]},
@@ -314,7 +792,9 @@ MANUAL_CLASSIFICATION_HINTS = {
             "binomial": {"methods": ["test"], "objects": ["binomial distribution"], "keywords": ["hypothesis", "significance"]},
             "poisson": {"methods": ["test"], "objects": ["poisson distribution"], "keywords": ["hypothesis", "significance"]},
             "normal": {"methods": ["test"], "objects": ["normal distribution"], "keywords": ["hypothesis", "significance"]},
-            "paired_or_unpaired_context_if_relevant": {"methods": ["test"], "objects": ["paired", "unpaired"], "keywords": ["hypothesis"]},
+        },
+        "central_limit_theorem": {
+            "approximation_using_clt": {"methods": ["approximate"], "objects": ["central limit theorem"], "keywords": ["large sample"]},
         },
     },
 }
@@ -322,11 +802,56 @@ MANUAL_CLASSIFICATION_HINTS = {
 DEFAULT_TOPIC_TAXONOMY = _flatten_topic_taxonomy(DEFAULT_PAPER_FAMILY_TAXONOMY)
 DEFAULT_CLASSIFICATION_HINTS = _deep_merge_dicts(
     _auto_classification_hints(DEFAULT_PAPER_FAMILY_TAXONOMY),
-    MANUAL_CLASSIFICATION_HINTS,
+    CAIE_CLASSIFICATION_HINTS,
 )
 DEFAULT_TOPICS = list(DEFAULT_TOPIC_TAXONOMY)
 
 DIFFICULTY_LABELS = ["easy", "average", "difficult"]
+
+DEFAULT_DIFFICULTY_HEURISTICS = {
+    "P1": {
+        "routine_easy_topics": ["quadratics", "differentiation", "integration"],
+        "difficult_topics": ["numerical_methods", "modulus", "binomial_expansion"],
+        "linked_keywords": ["hence", "deduce", "using your answer"],
+        "disguised_keywords": ["show that", "prove", "given that"],
+    },
+    "P2": {
+        "routine_easy_topics": ["differentiation", "integration"],
+        "difficult_topics": ["numerical_methods", "logarithmic_and_exponential_functions"],
+        "linked_keywords": ["hence", "deduce", "using your answer"],
+        "disguised_keywords": ["show that", "prove", "given that"],
+    },
+    "P3": {
+        "routine_easy_topics": ["logarithmic_and_exponential_functions"],
+        "difficult_topics": ["complex_numbers", "vectors", "differential_equations", "integration"],
+        "linked_keywords": ["hence", "deduce", "using your answer"],
+        "disguised_keywords": ["show that", "prove", "given that", "locus"],
+    },
+    "P4": {
+        "routine_easy_topics": ["kinematics"],
+        "difficult_topics": ["connected_particles", "forces_and_equilibrium", "momentum_and_impulse", "circular_motion"],
+        "linked_keywords": ["hence", "therefore", "subsequently"],
+        "disguised_keywords": ["model", "limiting", "coefficient of restitution"],
+    },
+    "P5": {
+        "routine_easy_topics": [],
+        "difficult_topics": ["probability", "correlation_and_regression"],
+        "linked_keywords": ["given that", "conditional", "interpret"],
+        "disguised_keywords": ["justify", "comment", "in context"],
+    },
+    "P6": {
+        "routine_easy_topics": [],
+        "difficult_topics": ["continuous_random_variables", "confidence_intervals", "hypothesis_testing", "central_limit_theorem"],
+        "linked_keywords": ["given that", "conditional", "interpret"],
+        "disguised_keywords": ["justify", "comment", "in context"],
+    },
+    "unknown": {
+        "routine_easy_topics": [],
+        "difficult_topics": [],
+        "linked_keywords": ["hence", "deduce", "given that"],
+        "disguised_keywords": ["show that", "prove"],
+    },
+}
 
 
 @dataclass
@@ -443,6 +968,9 @@ class AppConfig:
             for family, topics in DEFAULT_CLASSIFICATION_HINTS.items()
         }
     )
+    difficulty_heuristics: dict[str, dict[str, list[str]]] = field(
+        default_factory=lambda: {family: {key: list(values) for key, values in data.items()} for family, data in DEFAULT_DIFFICULTY_HEURISTICS.items()}
+    )
     difficulty_labels: list[str] = field(default_factory=lambda: list(DIFFICULTY_LABELS))
     detection: DetectionConfig = field(default_factory=DetectionConfig)
     ocr: OCRConfig = field(default_factory=OCRConfig)
@@ -496,7 +1024,7 @@ def validate_config(config: AppConfig) -> None:
         config.paper_family_taxonomy.setdefault(family, {})
 
     for family, topics in config.paper_family_taxonomy.items():
-        if family != "mixed_or_uncertain" and (not isinstance(topics, dict) or not topics):
+        if family != "unknown" and (not isinstance(topics, dict) or not topics):
             raise ValueError(f"paper_family_taxonomy.{family} must contain at least one topic.")
         if not isinstance(topics, dict):
             raise ValueError(f"paper_family_taxonomy.{family} must be a mapping.")
@@ -512,23 +1040,25 @@ def validate_config(config: AppConfig) -> None:
     config.topic_taxonomy = _flatten_topic_taxonomy(config.paper_family_taxonomy)
     config.topics = list(config.topic_taxonomy)
 
-    for family, topics in config.classification_hints.items():
-        if family not in config.paper_family_taxonomy:
-            raise ValueError(f"classification_hints contains unknown paper family `{family}`.")
-        if not isinstance(topics, dict):
-            raise ValueError(f"classification_hints.{family} must be a mapping.")
+    merged_hints = _deep_merge_dicts(_auto_classification_hints(config.paper_family_taxonomy), config.classification_hints)
+    valid_hints: dict[str, dict[str, dict[str, dict[str, list[str]]]]] = {}
+    for family, topics in merged_hints.items():
+        if family not in config.paper_family_taxonomy or not isinstance(topics, dict):
+            continue
         for topic, subtopics in topics.items():
-            if topic not in config.paper_family_taxonomy[family]:
-                raise ValueError(f"classification_hints.{family} contains unknown topic `{topic}`.")
-            if not isinstance(subtopics, dict):
-                raise ValueError(f"classification_hints.{family}.{topic} must be a mapping.")
+            if topic not in config.paper_family_taxonomy[family] or not isinstance(subtopics, dict):
+                continue
             for subtopic, hints in subtopics.items():
                 if subtopic not in config.paper_family_taxonomy[family][topic]:
-                    raise ValueError(f"classification_hints.{family}.{topic} contains unknown subtopic `{subtopic}`.")
+                    continue
                 _validate_hint_groups(hints, f"classification_hints.{family}.{topic}.{subtopic}")
+                valid_hints.setdefault(family, {}).setdefault(topic, {})[subtopic] = hints
+    config.classification_hints = valid_hints
 
     if config.difficulty_labels != DIFFICULTY_LABELS:
         raise ValueError(f"Difficulty labels must be exactly {DIFFICULTY_LABELS}.")
+    if not isinstance(config.difficulty_heuristics, dict):
+        raise ValueError("difficulty_heuristics must be a mapping.")
     if not 0 <= config.classification.uncertainty_threshold <= 1:
         raise ValueError("classification.uncertainty_threshold must be between 0 and 1.")
     if config.detection.output_mode not in {"prompt_only", "full_region"}:
@@ -582,6 +1112,10 @@ def _apply_mapping(config: AppConfig, raw: dict[str, Any]) -> None:
             if not isinstance(value, dict):
                 raise ValueError("Config section `paper_family_taxonomy` must be a mapping.")
             config.paper_family_taxonomy = value
+        elif key == "difficulty_heuristics":
+            if not isinstance(value, dict):
+                raise ValueError("Config section `difficulty_heuristics` must be a mapping.")
+            config.difficulty_heuristics = _deep_merge_dicts(config.difficulty_heuristics, value)
         elif key in {"paper_families", "topics", "topic_taxonomy", "difficulty_labels"}:
             setattr(config, key, value)
         else:

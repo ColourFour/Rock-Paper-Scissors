@@ -150,15 +150,19 @@ def _line_text_from_spans(spans: list[dict[str, Any]]) -> str:
     line_mid = (line_bbox[1] + line_bbox[3]) / 2
     pieces: list[str] = []
     previous_x1: float | None = None
+    previous_text = ""
 
     for span in spans:
         text = str(span.get("text", ""))
         if not text:
             continue
         x0, y0, x1, y1 = [float(value) for value in span.get("bbox", [0, 0, 0, 0])]
-        if previous_x1 is not None and x0 - previous_x1 > max(2.0, float(span.get("size", max_size)) * 0.35):
+        gap = x0 - previous_x1 if previous_x1 is not None else 0
+        operator_gap = _needs_operator_spacing(previous_text, text) and gap > 0.5
+        if previous_x1 is not None and (operator_gap or gap > max(2.0, float(span.get("size", max_size)) * 0.35)):
             pieces.append(" ")
         previous_x1 = x1
+        previous_text = text
 
         size = float(span.get("size", max_size))
         span_mid = (y0 + y1) / 2
@@ -172,6 +176,11 @@ def _line_text_from_spans(spans: list[dict[str, Any]]) -> str:
         pieces.append(text)
 
     return "".join(pieces)
+
+
+def _needs_operator_spacing(previous_text: str, text: str) -> bool:
+    operators = {"+", "-", "=", "<", ">", "≤", "≥", "±"}
+    return previous_text.strip() in operators or text.strip() in operators
 
 
 def _line_bbox_from_spans(spans: list[dict[str, Any]]) -> tuple[float, float, float, float]:

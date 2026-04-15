@@ -1,36 +1,43 @@
-from exam_bank.classification import classify_question, classify_question_parts
+from exam_bank.classification import classify_question, classify_question_parts, infer_source_paper_code, infer_source_paper_family
 from exam_bank.config import AppConfig
 
 
 def test_default_topic_taxonomy_uses_controlled_labels() -> None:
     config = AppConfig()
 
-    assert config.paper_families == ["P1", "P3", "P4", "P5", "P6", "mixed_or_uncertain"]
-    assert config.paper_family_taxonomy["P1"]["algebra"] == [
-        "quadratics",
-        "polynomials",
-        "partial_fractions",
-        "modulus",
-        "inequalities",
-        "surds",
-    ]
+    assert config.paper_families == ["P1", "P2", "P3", "P4", "P5", "P6", "unknown"]
+    assert "partial_fractions" in config.paper_family_taxonomy["P1"]
+    assert "complex_numbers" in config.paper_family_taxonomy["P3"]
+    assert "connected_particles" in config.paper_family_taxonomy["P4"]
+    assert "surds" not in config.paper_family_taxonomy["P1"]
+    assert "hypothesis_testing" not in config.paper_family_taxonomy["P1"]
     assert "advanced algebra" not in config.topic_taxonomy
-    assert "algebra" in config.topic_taxonomy
+    assert "partial_fractions" in config.topic_taxonomy
     assert config.difficulty_labels == ["easy", "average", "difficult"]
 
 
-def test_classifies_partial_fractions_as_controlled_algebra_label() -> None:
+def test_classifies_partial_fractions_inside_p1_topic_bank() -> None:
     result = classify_question(
         "1 Express (3x + 1)/((x + 1)(2x - 3)) in partial fractions. [4]",
         marks=4,
         config=AppConfig(),
+        source_name="9709_s21_qp_12.pdf",
     )
 
-    assert result.paper_family == "mixed_or_uncertain"
-    assert result.topic == "algebra"
-    assert result.subtopic == "partial_fractions"
-    assert result.topic_confidence == "medium"
+    assert result.source_paper_family == "P1"
+    assert result.source_paper_code == "12"
+    assert result.inferred_paper_family == "P1"
+    assert result.paper_family_confidence == "high"
+    assert result.paper_family == "P1"
+    assert result.topic == "partial_fractions"
+    assert result.subtopic == "general"
+    assert result.topic_confidence == "high"
     assert "partial fractions" in result.topic_evidence
+
+
+def test_source_paper_code_and_family_are_inferred_from_filename() -> None:
+    assert infer_source_paper_code("9709_s21_qp_12.pdf") == ("12", "high")
+    assert infer_source_paper_family("March 2019_qp_32.pdf") == ("P3", "high")
 
 
 def test_classifies_product_integral_as_integration_by_parts() -> None:
@@ -38,13 +45,14 @@ def test_classifies_product_integral_as_integration_by_parts() -> None:
         "2 Integrate x sec^2 x with respect to x. [5]",
         marks=5,
         config=AppConfig(),
+        source_name="9709_s21_qp_32.pdf",
     )
 
     assert result.paper_family == "P3"
-    assert result.topic == "calculus"
-    assert result.subtopic == "integration_by_parts"
+    assert result.topic == "integration"
+    assert result.subtopic == "general"
     assert result.topic_confidence in {"medium", "high"}
-    assert "integration by parts" in result.topic_evidence
+    assert "integration" in result.topic_evidence
 
 
 def test_classifies_argand_question_as_complex_numbers() -> None:
@@ -52,15 +60,16 @@ def test_classifies_argand_question_as_complex_numbers() -> None:
         "3 Sketch on an Argand diagram the locus of the complex number z such that |z - 2i| = 3. [4]",
         marks=4,
         config=AppConfig(),
+        source_name="9709_s21_qp_32.pdf",
     )
 
     assert result.paper_family == "P3"
     assert result.topic == "complex_numbers"
-    assert result.subtopic == "argand_diagrams"
+    assert result.subtopic == "general"
     assert "Argand" in result.topic_evidence
 
 
-def test_records_secondary_topic_for_mixed_grouped_question() -> None:
+def test_forces_one_topic_for_mixed_grouped_question() -> None:
     result = classify_question(
         (
             "4 Express the rational function in partial fractions. "
@@ -68,12 +77,13 @@ def test_records_secondary_topic_for_mixed_grouped_question() -> None:
         ),
         marks=8,
         config=AppConfig(),
+        source_name="9709_s21_qp_12.pdf",
     )
 
-    assert result.topic == "algebra"
-    assert result.subtopic == "partial_fractions"
-    assert "series" in result.secondary_topics
-    assert result.topic_uncertain
+    assert result.topic == "partial_fractions"
+    assert result.subtopic == "general"
+    assert result.secondary_topics == []
+    assert result.topic_confidence in {"high", "medium"}
 
 
 def test_classifies_detected_parts_separately() -> None:
@@ -84,12 +94,54 @@ def test_classifies_detected_parts_separately() -> None:
         ),
         question_number="9",
         config=AppConfig(),
+        source_name="9709_s21_qp_12.pdf",
     )
 
     assert [part["part_label"] for part in parts] == ["9(a)", "9(b)"]
-    assert parts[0]["paper_family"] == "mixed_or_uncertain"
-    assert parts[0]["topic"] == "algebra"
-    assert parts[0]["subtopic"] == "partial_fractions"
-    assert parts[1]["paper_family"] == "mixed_or_uncertain"
-    assert parts[1]["topic"] == "series"
-    assert parts[1]["subtopic"] == "binomial_expansion_fractional_negative"
+    assert parts[0]["paper_family"] == "P1"
+    assert parts[0]["topic"] == "partial_fractions"
+    assert parts[0]["subtopic"] == "general"
+    assert parts[1]["paper_family"] == "P1"
+    assert parts[1]["topic"] == "binomial_expansion"
+    assert parts[1]["subtopic"] == "general"
+
+
+def test_source_filename_restricts_topic_bank() -> None:
+    result = classify_question(
+        "A particle moves with constant acceleration. Find the tension in the string over a pulley. [6]",
+        marks=6,
+        config=AppConfig(),
+        source_name="9709_s21_qp_42.pdf",
+    )
+
+    assert result.source_paper_family == "P4"
+    assert result.paper_family == "P4"
+    assert result.topic == "connected_particles"
+
+
+def test_final_topic_candidates_are_restricted_before_scoring() -> None:
+    result = classify_question(
+        "Differentiate y = x^2 and find dy/dx. [3]",
+        marks=3,
+        config=AppConfig(),
+        source_name="9709_s21_qp_42.pdf",
+    )
+
+    assert result.paper_family == "P4"
+    assert result.topic in AppConfig().paper_family_taxonomy["P4"]
+    assert result.topic != "differentiation"
+    assert all(candidate.startswith("P4:") for candidate in result.alternative_topics)
+
+
+def test_forces_low_confidence_topic_within_known_paper_bank() -> None:
+    result = classify_question(
+        "A strangely worded task with little mathematical context. [2]",
+        marks=2,
+        config=AppConfig(),
+        source_name="9709_s21_qp_52.pdf",
+    )
+
+    assert result.paper_family == "P5"
+    assert result.topic in AppConfig().paper_family_taxonomy["P5"]
+    assert result.topic_confidence == "low"
+    assert "topic_forced_low_confidence" in result.review_flags

@@ -110,6 +110,14 @@ def cmd_process(args: argparse.Namespace) -> int:
 def cmd_topic_pdfs(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     question_bank = Path(args.question_bank) if args.question_bank else config.output.json_dir / config.naming.json_name
+    if not question_bank.exists():
+        print(
+            f"Question bank JSON not found: {question_bank}\n"
+            "Run `python -m exam_bank.cli process --config config.yaml` first, "
+            "or pass `--question-bank PATH` to an existing JSON export.",
+            file=sys.stderr,
+        )
+        return 1
     topic_result = build_topic_pdfs_from_json(question_bank, config)
     _print_topic_pdf_result(topic_result.pdf_paths, topic_result.skipped_count, topic_result.review_path)
     return 0

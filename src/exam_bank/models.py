@@ -95,9 +95,16 @@ class QuestionSpan:
 @dataclass
 class ClassificationResult:
     paper_family: str
+    source_paper_code: str
+    source_paper_family: str
+    inferred_paper_family: str
+    paper_family_confidence: str
     topic: str
     subtopic: str
     difficulty: str
+    difficulty_confidence: str
+    difficulty_evidence: str
+    difficulty_uncertain: bool
     confidence: float
     review_flags: list[str] = field(default_factory=list)
     topic_confidence: str = "low"
@@ -126,6 +133,9 @@ class QuestionRecord:
     combined_question_text: str
     answer_text: str
     paper_family: str
+    source_paper_family: str
+    inferred_paper_family: str
+    paper_family_confidence: str
     topic: str
     subtopic: str
     topic_confidence: str
@@ -133,18 +143,32 @@ class QuestionRecord:
     secondary_topics: list[str]
     topic_uncertain: bool
     difficulty: str
+    difficulty_confidence: str
+    difficulty_evidence: str
+    difficulty_uncertain: bool
     marks: int | None
     marks_if_available: int | None
     page_numbers: list[int]
     review_flags: list[str]
     confidence: float
+    source_paper_code: str = ""
     crop_uncertain: bool = False
+    question_crop_confidence: str = ""
     crop_debug_paths: list[str] = field(default_factory=list)
     topic_alternatives: list[str] = field(default_factory=list)
     question_level_paper_family: str = ""
     question_level_topic: str = ""
     question_level_subtopic: str = ""
     part_level_topics: list[dict[str, Any]] = field(default_factory=list)
+    markscheme_image: str = ""
+    markscheme_pages: list[int] = field(default_factory=list)
+    markscheme_question_number: str = ""
+    markscheme_crop_confidence: str = ""
+    markscheme_mapping_method: str = ""
+    markscheme_table_detected: bool = False
+    markscheme_table_header_detected: list[str] = field(default_factory=list)
+    markscheme_nearby_anchors: list[str] = field(default_factory=list)
+    markscheme_debug_paths: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         question_level_paper_family = self.question_level_paper_family or self.paper_family
@@ -155,10 +179,17 @@ class QuestionRecord:
             "paper_name": self.paper_name,
             "question_number": self.question_number,
             "full_question_label": self.full_question_label,
+            "question_image": self.screenshot_path,
+            "question_pages": self.page_numbers,
+            "question_crop_confidence": self.question_crop_confidence or ("low" if self.crop_uncertain else "high"),
             "screenshot_path": self.screenshot_path,
             "combined_question_text": self.combined_question_text,
             "answer_text": self.answer_text,
             "paper_family": question_level_paper_family,
+            "source_paper_code": self.source_paper_code,
+            "source_paper_family": self.source_paper_family,
+            "inferred_paper_family": self.inferred_paper_family,
+            "paper_family_confidence": self.paper_family_confidence,
             "question_level_paper_family": question_level_paper_family,
             "question_level_topic": question_level_topic,
             "question_level_subtopic": question_level_subtopic,
@@ -170,6 +201,9 @@ class QuestionRecord:
             "secondary_topics": self.secondary_topics,
             "topic_uncertain": self.topic_uncertain,
             "difficulty": self.difficulty,
+            "difficulty_confidence": self.difficulty_confidence,
+            "difficulty_evidence": self.difficulty_evidence,
+            "difficulty_uncertain": self.difficulty_uncertain,
             "marks": self.marks,
             "marks_if_available": self.marks_if_available,
             "page_numbers": self.page_numbers,
@@ -178,6 +212,16 @@ class QuestionRecord:
             "crop_uncertain": self.crop_uncertain,
             "crop_debug_paths": self.crop_debug_paths,
             "topic_alternatives": self.topic_alternatives,
+            "markscheme_text": self.answer_text,
+            "markscheme_image": self.markscheme_image,
+            "markscheme_pages": self.markscheme_pages,
+            "markscheme_question_number": self.markscheme_question_number,
+            "markscheme_crop_confidence": self.markscheme_crop_confidence,
+            "markscheme_mapping_method": self.markscheme_mapping_method,
+            "markscheme_table_detected": self.markscheme_table_detected,
+            "markscheme_table_header_detected": self.markscheme_table_header_detected,
+            "markscheme_nearby_anchors": self.markscheme_nearby_anchors,
+            "markscheme_debug_paths": self.markscheme_debug_paths,
         }
 
 
@@ -191,6 +235,19 @@ class ReviewItem:
     page_numbers: list[int] = field(default_factory=list)
     crop_uncertain: bool = False
     crop_debug_paths: list[str] = field(default_factory=list)
+    paper_family: str = ""
+    topic_candidates: list[str] = field(default_factory=list)
+    chosen_topic: str = ""
+    chosen_difficulty: str = ""
+    evidence: str = ""
+    markscheme_image_found: bool | None = None
+    markscheme_pages: list[int] = field(default_factory=list)
+    markscheme_crop_confidence: str = ""
+    markscheme_mapping_method: str = ""
+    markscheme_table_detected: bool | None = None
+    markscheme_table_header_detected: list[str] = field(default_factory=list)
+    markscheme_nearby_anchors: list[str] = field(default_factory=list)
+    classification_restricted_by_paper_family: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -202,4 +259,19 @@ class ReviewItem:
             "page_numbers": ",".join(str(page) for page in self.page_numbers),
             "crop_uncertain": "true" if self.crop_uncertain else "false",
             "crop_debug_paths": ",".join(self.crop_debug_paths),
+            "paper_family": self.paper_family,
+            "topic_candidates": ";".join(self.topic_candidates),
+            "chosen_topic": self.chosen_topic,
+            "chosen_difficulty": self.chosen_difficulty,
+            "evidence": self.evidence,
+            "markscheme_image_found": "" if self.markscheme_image_found is None else ("true" if self.markscheme_image_found else "false"),
+            "markscheme_pages": ",".join(str(page) for page in self.markscheme_pages),
+            "markscheme_crop_confidence": self.markscheme_crop_confidence,
+            "markscheme_mapping_method": self.markscheme_mapping_method,
+            "markscheme_table_detected": "" if self.markscheme_table_detected is None else ("true" if self.markscheme_table_detected else "false"),
+            "markscheme_table_header_detected": ",".join(self.markscheme_table_header_detected),
+            "markscheme_nearby_anchors": ";".join(self.markscheme_nearby_anchors),
+            "classification_restricted_by_paper_family": ""
+            if self.classification_restricted_by_paper_family is None
+            else ("true" if self.classification_restricted_by_paper_family else "false"),
         }

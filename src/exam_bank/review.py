@@ -21,6 +21,23 @@ def review_items_from_records(records: list[QuestionRecord]) -> list[ReviewItem]
                     page_numbers=record.page_numbers,
                     crop_uncertain=record.crop_uncertain or flag == "crop_uncertain",
                     crop_debug_paths=record.crop_debug_paths,
+                    paper_family=record.paper_family,
+                    topic_candidates=record.topic_alternatives,
+                    chosen_topic=record.question_level_topic or record.topic,
+                    chosen_difficulty=record.difficulty,
+                    evidence="; ".join(
+                        item
+                        for item in [record.topic_evidence, record.difficulty_evidence]
+                        if item
+                    ),
+                    markscheme_image_found=bool(record.markscheme_image),
+                    markscheme_pages=record.markscheme_pages,
+                    markscheme_crop_confidence=record.markscheme_crop_confidence,
+                    markscheme_mapping_method=record.markscheme_mapping_method,
+                    markscheme_table_detected=record.markscheme_table_detected,
+                    markscheme_table_header_detected=record.markscheme_table_header_detected,
+                    markscheme_nearby_anchors=record.markscheme_nearby_anchors,
+                    classification_restricted_by_paper_family=record.paper_family not in {"", "unknown"},
                 )
             )
     return items
@@ -43,6 +60,19 @@ def write_review_file(records: list[QuestionRecord], config: AppConfig, basename
                 "page_numbers": "",
                 "crop_uncertain": "",
                 "crop_debug_paths": "",
+                "paper_family": "",
+                "topic_candidates": "",
+                "chosen_topic": "",
+                "chosen_difficulty": "",
+                "evidence": "",
+                "markscheme_image_found": "",
+                "markscheme_pages": "",
+                "markscheme_crop_confidence": "",
+                "markscheme_mapping_method": "",
+                "markscheme_table_detected": "",
+                "markscheme_table_header_detected": "",
+                "markscheme_nearby_anchors": "",
+                "classification_restricted_by_paper_family": "",
             }
         ]
 
@@ -66,6 +96,19 @@ def append_review_items(items: list[ReviewItem], config: AppConfig, basename: st
         "page_numbers",
         "crop_uncertain",
         "crop_debug_paths",
+        "paper_family",
+        "topic_candidates",
+        "chosen_topic",
+        "chosen_difficulty",
+        "evidence",
+        "markscheme_image_found",
+        "markscheme_pages",
+        "markscheme_crop_confidence",
+        "markscheme_mapping_method",
+        "markscheme_table_detected",
+        "markscheme_table_header_detected",
+        "markscheme_nearby_anchors",
+        "classification_restricted_by_paper_family",
     ]
     file_has_rows = output_path.exists() and output_path.stat().st_size > 0
     with output_path.open("a", newline="", encoding="utf-8") as handle:
@@ -92,6 +135,9 @@ def _message_for_flag(flag: str) -> str:
         "uncertain_topic_tie": "Local topic classifier found multiple topics with the same score.",
         "marks_missing_for_difficulty": "Difficulty was inferred without an extracted marks value.",
         "low_classification_confidence": "Local classification confidence is below the configured threshold.",
+        "missing_question_image": "No question image was attached for this record.",
+        "low_confidence_question_crop": "The question crop should be checked before using it with students.",
+        "difficulty_uncertain": "Difficulty label should be checked before trusting the exported metadata.",
         "ocr_question_text": "Question text came from OCR fallback and may need checking.",
         "question_sequence_gap": "Detected question numbers skipped at least one expected number.",
         "question_start_uncertain": "The layout anchor for this question had a lower confidence score.",
@@ -107,5 +153,15 @@ def _message_for_flag(flag: str) -> str:
         "topic_pdf_missing_topic": "Topic PDF export skipped this record because the topic label was missing.",
         "topic_pdf_missing_difficulty": "Topic PDF export skipped this record because the difficulty label was missing or unsupported.",
         "topic_pdf_bad_image": "Topic PDF export skipped this record because the image could not be opened.",
+        "markscheme_image_missing": "No mark scheme image crop was attached for this question.",
+        "markscheme_image_uncertain": "A mark scheme image crop was attached, but its boundary should be checked.",
+        "markscheme_image_stitched": "The mark scheme image was stitched from multiple page regions.",
+        "markscheme_image_no_boundaries": "Mark scheme question boundaries could not be detected for image export.",
+        "markscheme_table_detection_failed": "Structured CAIE mark scheme table detection failed; fallback mapping was used.",
+        "markscheme_answer_table_header_missing": "No mark scheme answer table with Question, Answer, Marks, and Guidance headers was found.",
+        "markscheme_no_row_for_question": "No row in the answer table matched this question number.",
+        "markscheme_table_continuation_inferred": "A mark scheme continuation page was inferred without a detected table header.",
+        "topic_forced_no_rule_match": "No strong topic rule matched, so the classifier forced the best paper-valid topic.",
+        "topic_forced_low_confidence": "The final topic is required but has low diagnostic confidence.",
     }
     return messages.get(flag, "Review this item before trusting the exported metadata.")

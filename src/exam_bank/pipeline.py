@@ -4,11 +4,11 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 
-from .classification import classify_question, classify_question_parts
+from .classification import classify_question, classify_question_parts, infer_source_paper_code
 from .config import AppConfig
 from .exporters import export_records
 from .image_rendering import render_question_image
-from .mark_schemes import extract_mark_scheme_answers, find_mark_scheme
+from .mark_schemes import MarkSchemeImageResult, extract_mark_scheme_answers, find_mark_scheme, render_mark_scheme_images
 from .models import ClassificationResult, PageLayout, QuestionRecord, QuestionSpan
 from .pdf_extract import extract_pdf_layout
 from .question_detection import detect_question_anchor_candidates, detect_question_spans, extract_marks_from_text
@@ -31,6 +31,7 @@ def process_batch(config: AppConfig) -> PipelineResult:
         records.extend(build_records_for_pdf(question_pdf, config))
     json_path, csv_path = export_records(records, config)
     review_path = write_review_file(records, config)
+    _write_batch_diagnostic(records, config)
     return PipelineResult(records, json_path, csv_path, review_path)
 
 
@@ -40,6 +41,7 @@ def process_sample(question_pdf: str | Path, config: AppConfig, mark_scheme_pdf:
     basename = _safe_basename(Path(question_pdf).stem)
     json_path, csv_path = export_records(records, config, basename=f"{basename}_sample")
     review_path = write_review_file(records, config, basename=f"{basename}_sample")
+    _write_batch_diagnostic(records, config, basename=f"{basename}_sample")
     return PipelineResult(records, json_path, csv_path, review_path)
 
 
@@ -59,28 +61,46 @@ def build_records_for_pdf(
         config.input.mappings_dir,
     )
     answers: dict[str, str] = {}
+    mark_scheme_images: dict[str, MarkSchemeImageResult] = {}
     mark_scheme_flags: list[str] = []
     if matched_mark_scheme and matched_mark_scheme.exists():
         try:
             answers = extract_mark_scheme_answers(matched_mark_scheme, config, expected_numbers)
         except Exception as exc:
             mark_scheme_flags.append(f"mark_scheme_extract_failed:{exc.__class__.__name__}")
+        try:
+            mark_scheme_images = render_mark_scheme_images(matched_mark_scheme, config, expected_numbers)
+        except Exception as exc:
+            mark_scheme_flags.append(f"markscheme_image_export_failed:{exc.__class__.__name__}")
     else:
         mark_scheme_flags.append("unmatched_mark_scheme")
 
     records: list[QuestionRecord] = []
+    source_paper_code, _source_paper_code_confidence = infer_source_paper_code(question_pdf.name)
     for span in spans:
         answer_text = answers.get(span.question_number, "")
         flags = list(span.review_flags)
         flags.extend(mark_scheme_flags)
         if matched_mark_scheme and matched_mark_scheme.exists() and not answer_text:
             flags.append("unmatched_answer")
+        mark_scheme_image = mark_scheme_images.get(span.question_number)
+        if matched_mark_scheme and matched_mark_scheme.exists():
+            if mark_scheme_image is None or not mark_scheme_image.image_path:
+                flags.append("markscheme_image_missing")
+            elif mark_scheme_image.crop_confidence != "high":
+                flags.append("markscheme_image_uncertain")
+            if mark_scheme_image:
+                flags.extend(mark_scheme_image.review_flags)
 
         render_result = render_question_image(question_pdf, span, layouts, config)
+        if not render_result.screenshot_path:
+            flags.append("missing_question_image")
+        if render_result.crop_uncertain:
+            flags.append("low_confidence_question_crop")
         question_text = render_result.extracted_text or span.combined_text
         marks = extract_marks_from_text(question_text)
-        classification = classify_question(question_text, marks, config, context_flags=flags)
-        part_level_topics = classify_question_parts(question_text, span.question_number, config, context_flags=flags)
+        classification = classify_question(question_text, marks, config, context_flags=flags, source_name=question_pdf.name)
+        part_level_topics = classify_question_parts(question_text, span.question_number, config, context_flags=flags, source_name=question_pdf.name)
         question_topic = _question_topic_from_parts(classification, part_level_topics)
         flags.extend(question_topic["review_flags"])
         flags.extend(render_result.review_flags)
@@ -96,6 +116,10 @@ def build_records_for_pdf(
                 combined_question_text=question_text,
                 answer_text=answer_text,
                 paper_family=str(question_topic["paper_family"]),
+                source_paper_code=source_paper_code,
+                source_paper_family=classification.source_paper_family,
+                inferred_paper_family=classification.inferred_paper_family,
+                paper_family_confidence=classification.paper_family_confidence,
                 question_level_paper_family=str(question_topic["paper_family"]),
                 question_level_topic=str(question_topic["topic"]),
                 question_level_subtopic=str(question_topic["subtopic"]),
@@ -107,14 +131,27 @@ def build_records_for_pdf(
                 secondary_topics=list(question_topic["secondary_topics"]),
                 topic_uncertain=bool(question_topic["topic_uncertain"]),
                 difficulty=classification.difficulty,
+                difficulty_confidence=classification.difficulty_confidence,
+                difficulty_evidence=classification.difficulty_evidence,
+                difficulty_uncertain=classification.difficulty_uncertain,
                 marks=marks,
                 marks_if_available=marks,
                 page_numbers=span.page_numbers,
                 review_flags=sorted(set(flags)),
                 confidence=confidence,
                 crop_uncertain=render_result.crop_uncertain,
+                question_crop_confidence="low" if render_result.crop_uncertain else "high",
                 crop_debug_paths=render_result.debug_paths,
                 topic_alternatives=classification.alternative_topics,
+                markscheme_image=_display_path(mark_scheme_image.image_path) if mark_scheme_image and mark_scheme_image.image_path else "",
+                markscheme_pages=mark_scheme_image.page_numbers if mark_scheme_image else [],
+                markscheme_question_number=mark_scheme_image.markscheme_question_number if mark_scheme_image else "",
+                markscheme_crop_confidence=mark_scheme_image.crop_confidence if mark_scheme_image else "",
+                markscheme_mapping_method=mark_scheme_image.mapping_method if mark_scheme_image else "",
+                markscheme_table_detected=mark_scheme_image.table_detected if mark_scheme_image else False,
+                markscheme_table_header_detected=mark_scheme_image.table_header_detected if mark_scheme_image else [],
+                markscheme_nearby_anchors=mark_scheme_image.nearby_anchors if mark_scheme_image else [],
+                markscheme_debug_paths=mark_scheme_image.debug_paths if mark_scheme_image else [],
             )
         )
     _write_pdf_diagnostic(question_pdf, layouts, spans, records, config)
@@ -132,40 +169,30 @@ def _question_topic_from_parts(
     part_level_topics: list[dict[str, object]],
 ) -> dict[str, object]:
     review_flags = list(classification.review_flags)
-    secondary_topics = _secondary_main_topics(classification.secondary_topics, classification.topic)
+    secondary_topics: list[str] = []
     topic_confidence = classification.topic_confidence
     topic_uncertain = classification.topic_uncertain
     confidence = classification.confidence
     paper_family = classification.paper_family
 
-    part_topics = [str(part.get("topic", "")) for part in part_level_topics if part.get("topic")]
     part_families = sorted(
         {
             str(part.get("paper_family", ""))
             for part in part_level_topics
-            if part.get("paper_family") and part.get("paper_family") != "mixed_or_uncertain"
+            if part.get("paper_family") and part.get("paper_family") != "unknown"
         }
     )
-    mixed_part_topics = sorted({topic for topic in part_topics if topic and topic != classification.topic})
-    if mixed_part_topics:
-        secondary_topics = sorted(set(secondary_topics + mixed_part_topics))
-        if topic_confidence == "high":
-            topic_confidence = "medium"
-            confidence = min(confidence, 0.66)
-        review_flags = _clear_resolved_mixed_topic_flags(review_flags)
-        topic_uncertain = _topic_uncertain_from_flags(review_flags)
 
-    if len(part_families) == 1 and paper_family == "mixed_or_uncertain":
+    if len(part_families) == 1 and paper_family == "unknown":
         paper_family = part_families[0]
     elif len(part_families) > 1:
-        paper_family = "mixed_or_uncertain"
+        paper_family = "unknown"
         review_flags.append("paper_family_uncertain")
-    elif paper_family == "mixed_or_uncertain":
+    elif paper_family == "unknown":
         review_flags.append("paper_family_uncertain")
 
     if any(part.get("topic_uncertain") or part.get("topic_confidence") == "low" for part in part_level_topics):
         review_flags.append("part_topic_uncertain")
-        topic_uncertain = True
 
     return {
         "paper_family": paper_family,
@@ -250,11 +277,60 @@ def _write_pdf_diagnostic(
         "footer_header_contamination_count": len(footer_contamination),
         "footer_header_contamination_questions": footer_contamination,
         "crop_uncertain_count": sum(1 for record in records if record.crop_uncertain),
+        "topic_counts_by_paper_family": _topic_counts_by_paper_family(records),
+        "difficulty_counts_by_paper_family": _difficulty_counts_by_paper_family(records),
+        "markscheme_image_count": sum(1 for record in records if record.markscheme_image),
+        "markscheme_image_missing_count": sum(1 for record in records if "markscheme_image_missing" in record.review_flags),
         "review_flag_counts": _flag_counts(records),
     }
     path = config.output.review_dir / f"{paper_name}_diagnostics.json"
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return path
+
+
+def _write_batch_diagnostic(records: list[QuestionRecord], config: AppConfig, basename: str | None = None) -> Path:
+    config.ensure_output_dirs()
+    name = f"{basename}_diagnostics.json" if basename else "batch_diagnostics.json"
+    payload = {
+        "record_count": len(records),
+        "paper_family_counts": _paper_family_counts(records),
+        "topic_counts_by_paper_family": _topic_counts_by_paper_family(records),
+        "difficulty_counts_by_paper_family": _difficulty_counts_by_paper_family(records),
+        "markscheme_image_count": sum(1 for record in records if record.markscheme_image),
+        "markscheme_image_missing_count": sum(1 for record in records if "markscheme_image_missing" in record.review_flags),
+        "review_flag_counts": _flag_counts(records),
+    }
+    path = config.output.review_dir / name
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
+
+
+def _paper_family_counts(records: list[QuestionRecord]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for record in records:
+        family = record.paper_family or "unknown"
+        counts[family] = counts.get(family, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _topic_counts_by_paper_family(records: list[QuestionRecord]) -> dict[str, dict[str, int]]:
+    counts: dict[str, dict[str, int]] = {}
+    for record in records:
+        family = record.paper_family or "unknown"
+        topic = record.question_level_topic or record.topic or "unknown"
+        family_counts = counts.setdefault(family, {})
+        family_counts[topic] = family_counts.get(topic, 0) + 1
+    return {family: dict(sorted(topic_counts.items())) for family, topic_counts in sorted(counts.items())}
+
+
+def _difficulty_counts_by_paper_family(records: list[QuestionRecord]) -> dict[str, dict[str, int]]:
+    counts: dict[str, dict[str, int]] = {}
+    for record in records:
+        family = record.paper_family or "unknown"
+        difficulty = record.difficulty or "unknown"
+        family_counts = counts.setdefault(family, {})
+        family_counts[difficulty] = family_counts.get(difficulty, 0) + 1
+    return {family: dict(sorted(difficulty_counts.items())) for family, difficulty_counts in sorted(counts.items())}
 
 
 def _flag_counts(records: list[QuestionRecord]) -> dict[str, int]:
@@ -276,6 +352,9 @@ def _write_topic_debug_report(question_pdf: Path, records: list[QuestionRecord],
                 "question_number": record.question_number,
                 "text_snippet": record.combined_question_text[:500],
                 "paper_family": record.paper_family,
+                "source_paper_family": record.source_paper_family,
+                "inferred_paper_family": record.inferred_paper_family,
+                "paper_family_confidence": record.paper_family_confidence,
                 "question_level_paper_family": record.question_level_paper_family or record.paper_family,
                 "question_level_topic": record.question_level_topic or record.topic,
                 "question_level_subtopic": record.question_level_subtopic or record.subtopic,
@@ -288,6 +367,16 @@ def _write_topic_debug_report(question_pdf: Path, records: list[QuestionRecord],
                 "secondary_topics": record.secondary_topics,
                 "part_level_topics": record.part_level_topics,
                 "alternative_candidate_topics": record.topic_alternatives if record.topic_confidence != "high" else [],
+                "difficulty": record.difficulty,
+                "difficulty_confidence": record.difficulty_confidence,
+                "difficulty_evidence": record.difficulty_evidence,
+                "difficulty_uncertain": record.difficulty_uncertain,
+                "markscheme_image_found": bool(record.markscheme_image),
+                "markscheme_question_number": record.markscheme_question_number,
+                "markscheme_crop_confidence": record.markscheme_crop_confidence,
+                "markscheme_mapping_method": record.markscheme_mapping_method,
+                "markscheme_table_detected": record.markscheme_table_detected,
+                "classification_restricted_by_paper_family": record.paper_family not in {"", "unknown"},
             }
             for record in records
         ],

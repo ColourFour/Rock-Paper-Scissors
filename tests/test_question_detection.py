@@ -3,13 +3,17 @@ from pathlib import Path
 from exam_bank.config import AppConfig
 from exam_bank.exporters import write_csv, write_json
 from exam_bank.image_rendering import _detect_prompt_regions
-from exam_bank.mark_schemes import find_mark_scheme
+from exam_bank.mark_schemes import _detect_mark_scheme_tables, _detect_table_question_anchors, _table_regions_for_anchor, find_mark_scheme
 from exam_bank.models import BoundingBox, PageLayout, QuestionRecord, TextBlock
 from exam_bank.question_detection import detect_question_spans, extract_marks_from_text, parse_question_start
 
 
 def block(page: int, text: str, y: float, x: float = 50) -> TextBlock:
     return TextBlock(page_number=page, text=text, bbox=BoundingBox(x, y, x + 300, y + 12))
+
+
+def cell(page: int, text: str, y: float, x: float, width: float = 45) -> TextBlock:
+    return TextBlock(page_number=page, text=text, bbox=BoundingBox(x, y, x + width, y + 12))
 
 
 def test_parse_question_start_accepts_top_level_and_subpart_label() -> None:
@@ -60,6 +64,94 @@ def test_mark_scheme_auto_pairing(tmp_path: Path) -> None:
     assert find_mark_scheme(qp, ms_dir) == ms
 
 
+def test_mark_scheme_table_mapping_merges_blank_question_number_continuation_rows() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            cell(1, "Question", 100, x=45, width=55),
+            cell(1, "Answer", 100, x=130, width=50),
+            cell(1, "Marks", 100, x=390, width=45),
+            cell(1, "Guidance", 100, x=455, width=65),
+            cell(1, "1", 135, x=50, width=10),
+            cell(1, "x = 2", 135, x=130),
+            cell(1, "M1", 135, x=390, width=25),
+            cell(1, "Allow equivalent", 135, x=455, width=120),
+            cell(1, "continued working", 165, x=130, width=120),
+            cell(1, "A1", 165, x=390, width=25),
+            cell(1, "further guidance for same question", 195, x=455, width=120),
+            cell(1, "2", 220, x=50, width=10),
+            cell(1, "Differentiate", 220, x=130, width=100),
+        ],
+    )
+
+    tables = _detect_mark_scheme_tables([layout], config)
+    anchors = _detect_table_question_anchors([layout], tables, config, ["1", "2"])
+    regions, flags = _table_regions_for_anchor([layout], tables, anchors[0], anchors[1], config)
+
+    assert tables[1].question_col_right < 130
+    assert [anchor.question_number for anchor in anchors] == ["1", "2"]
+    assert not flags
+    assert len(regions) == 1
+    assert regions[0].bbox.y0 < 135
+    assert regions[0].bbox.y1 > 195
+    assert regions[0].bbox.y1 < 220
+    assert regions[0].bbox.x0 <= tables[1].bbox.x0
+    assert regions[0].bbox.x1 >= tables[1].bbox.x1
+
+
+def test_mark_scheme_table_detection_requires_answer_table_headers() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            cell(1, "Question", 100, x=45, width=55),
+            cell(1, "Mark Scheme", 100, x=130, width=80),
+            cell(1, "Rules", 100, x=390, width=45),
+            cell(1, "1", 135, x=50, width=10),
+            cell(1, "General rubric", 135, x=130, width=120),
+        ],
+    )
+
+    assert _detect_mark_scheme_tables([layout], config) == {}
+
+
+def test_mark_scheme_table_detection_ignores_earlier_non_answer_table() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            cell(1, "Question", 80, x=45, width=55),
+            cell(1, "Mark Scheme", 80, x=130, width=80),
+            cell(1, "Rules", 80, x=390, width=45),
+            cell(1, "1", 110, x=50, width=10),
+            cell(1, "General rubric", 110, x=130, width=120),
+            cell(1, "Question", 210, x=45, width=55),
+            cell(1, "Answer", 210, x=130, width=50),
+            cell(1, "Marks", 210, x=390, width=45),
+            cell(1, "Guidance", 210, x=455, width=65),
+            cell(1, "1", 245, x=50, width=10),
+            cell(1, "x = 2", 245, x=130),
+            cell(1, "B1", 245, x=390, width=25),
+        ],
+    )
+
+    tables = _detect_mark_scheme_tables([layout], config)
+    anchors = _detect_table_question_anchors([layout], tables, config, ["1"])
+
+    assert list(tables) == [1]
+    assert tables[1].header_detected == ["Question", "Answer", "Marks", "Guidance"]
+    assert tables[1].header_bottom > 210
+    assert [anchor.question_number for anchor in anchors] == ["1"]
+    assert anchors[0].y0 == 245
+
+
 def test_record_json_schema_contains_required_fields(tmp_path: Path) -> None:
     record = QuestionRecord(
         source_pdf="paper.pdf",
@@ -70,13 +162,19 @@ def test_record_json_schema_contains_required_fields(tmp_path: Path) -> None:
         combined_question_text="Find x.",
         answer_text="x = 2",
         paper_family="P1",
-        topic="algebra",
-        subtopic="quadratics",
+        source_paper_family="P1",
+        inferred_paper_family="P1",
+        paper_family_confidence="high",
+        topic="quadratics",
+        subtopic="solving",
         topic_confidence="medium",
         topic_evidence="test fixture",
         secondary_topics=[],
         topic_uncertain=False,
         difficulty="easy",
+        difficulty_confidence="high",
+        difficulty_evidence="direct routine method",
+        difficulty_uncertain=False,
         marks=3,
         marks_if_available=3,
         page_numbers=[1],
@@ -91,10 +189,17 @@ def test_record_json_schema_contains_required_fields(tmp_path: Path) -> None:
         "paper_name",
         "question_number",
         "full_question_label",
+        "question_image",
+        "question_pages",
+        "question_crop_confidence",
         "screenshot_path",
         "combined_question_text",
         "answer_text",
         "paper_family",
+        "source_paper_code",
+        "source_paper_family",
+        "inferred_paper_family",
+        "paper_family_confidence",
         "question_level_paper_family",
         "question_level_topic",
         "question_level_subtopic",
@@ -107,11 +212,24 @@ def test_record_json_schema_contains_required_fields(tmp_path: Path) -> None:
         "topic_uncertain",
         "topic_alternatives",
         "difficulty",
+        "difficulty_confidence",
+        "difficulty_evidence",
+        "difficulty_uncertain",
         "marks",
         "marks_if_available",
         "page_numbers",
         "review_flags",
         "confidence",
+        "markscheme_text",
+        "markscheme_image",
+        "markscheme_pages",
+        "markscheme_question_number",
+        "markscheme_crop_confidence",
+        "markscheme_mapping_method",
+        "markscheme_table_detected",
+        "markscheme_table_header_detected",
+        "markscheme_nearby_anchors",
+        "markscheme_debug_paths",
     ]:
         assert f'"{key}"' in data
 
@@ -126,13 +244,19 @@ def test_csv_is_image_first_and_omits_question_text(tmp_path: Path) -> None:
         combined_question_text="This should stay out of the CSV.",
         answer_text="x = 2",
         paper_family="P1",
-        topic="algebra",
-        subtopic="quadratics",
+        source_paper_family="P1",
+        inferred_paper_family="P1",
+        paper_family_confidence="high",
+        topic="quadratics",
+        subtopic="solving",
         topic_confidence="medium",
         topic_evidence="test fixture",
         secondary_topics=[],
         topic_uncertain=False,
         difficulty="easy",
+        difficulty_confidence="high",
+        difficulty_evidence="direct routine method",
+        difficulty_uncertain=False,
         marks=3,
         marks_if_available=3,
         page_numbers=[1],
@@ -146,6 +270,13 @@ def test_csv_is_image_first_and_omits_question_text(tmp_path: Path) -> None:
     assert "question_image" in data
     assert "question_image_link" in data
     assert "paper_family" in data
+    assert "source_paper_code" in data
+    assert "source_paper_family" in data
+    assert "question_pages" in data
+    assert "question_crop_confidence" in data
+    assert "difficulty_confidence" in data
+    assert "markscheme_image" in data
+    assert "markscheme_table_header_detected" in data
     assert "question_level_paper_family" in data
     assert "question_level_topic" in data
     assert "part_level_topics" in data
