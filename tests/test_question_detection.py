@@ -16,6 +16,14 @@ def cell(page: int, text: str, y: float, x: float, width: float = 45) -> TextBlo
     return TextBlock(page_number=page, text=text, bbox=BoundingBox(x, y, x + width, y + 12))
 
 
+def hline(y: float, x0: float = 40, x1: float = 560) -> BoundingBox:
+    return BoundingBox(x0, y, x1, y + 1)
+
+
+def vline(x: float, y0: float = 95, y1: float = 230) -> BoundingBox:
+    return BoundingBox(x, y0, x + 1, y1)
+
+
 def test_parse_question_start_accepts_top_level_and_subpart_label() -> None:
     config = AppConfig()
     assert parse_question_start("1 Solve the equation", config) == ("1", "1")
@@ -95,7 +103,7 @@ def test_mark_scheme_table_mapping_merges_blank_question_number_continuation_row
     assert [anchor.question_number for anchor in anchors] == ["1", "2"]
     assert not flags
     assert len(regions) == 1
-    assert regions[0].bbox.y0 < 135
+    assert regions[0].bbox.y0 < 105
     assert regions[0].bbox.y1 > 195
     assert regions[0].bbox.y1 < 220
     assert regions[0].bbox.x0 <= tables[1].bbox.x0
@@ -150,6 +158,85 @@ def test_mark_scheme_table_detection_ignores_earlier_non_answer_table() -> None:
     assert tables[1].header_bottom > 210
     assert [anchor.question_number for anchor in anchors] == ["1"]
     assert anchors[0].y0 == 245
+
+
+def test_mark_scheme_table_crop_includes_header_row_and_full_width() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            cell(1, "Question", 100, x=45, width=55),
+            cell(1, "Answer", 100, x=130, width=50),
+            cell(1, "Marks", 100, x=390, width=45),
+            cell(1, "Guidance", 100, x=455, width=65),
+            cell(1, "1", 140, x=50, width=10),
+            cell(1, "Solution line", 140, x=130, width=120),
+            cell(1, "M1", 140, x=390, width=25),
+            cell(1, "Total", 172, x=130, width=45),
+            cell(1, "5", 172, x=390, width=10),
+            cell(1, "2", 210, x=50, width=10),
+            cell(1, "Next question", 210, x=130, width=100),
+        ],
+    )
+
+    tables = _detect_mark_scheme_tables([layout], config)
+    anchors = _detect_table_question_anchors([layout], tables, config, ["1", "2"])
+    regions, flags = _table_regions_for_anchor([layout], tables, anchors[0], anchors[1], config)
+
+    assert not flags
+    assert len(regions) == 1
+    assert regions[0].bbox.x0 == tables[1].bbox.x0
+    assert regions[0].bbox.x1 == tables[1].bbox.x1
+    assert regions[0].bbox.y0 <= tables[1].bbox.y0
+    assert regions[0].bbox.y0 < anchors[0].y0
+    assert regions[0].bbox.y1 > 172
+    assert regions[0].bbox.y1 < anchors[1].y0
+
+
+def test_mark_scheme_table_crop_prefers_visible_ruling_lines() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            cell(1, "Question", 100, x=45, width=55),
+            cell(1, "Answer", 100, x=130, width=50),
+            cell(1, "Marks", 100, x=390, width=45),
+            cell(1, "Guidance", 100, x=455, width=65),
+            cell(1, "1", 140, x=50, width=10),
+            cell(1, "Solution line", 140, x=130, width=120),
+            cell(1, "Total", 172, x=130, width=45),
+            cell(1, "5", 172, x=390, width=10),
+            cell(1, "2", 212, x=50, width=10),
+            cell(1, "Next question", 212, x=130, width=100),
+        ],
+        graphics=[
+            hline(95),
+            hline(122),
+            hline(162),
+            hline(202),
+            hline(230),
+            vline(40),
+            vline(120),
+            vline(380),
+            vline(445),
+            vline(560),
+        ],
+    )
+
+    tables = _detect_mark_scheme_tables([layout], config)
+    anchors = _detect_table_question_anchors([layout], tables, config, ["1", "2"])
+    regions, flags = _table_regions_for_anchor([layout], tables, anchors[0], anchors[1], config)
+
+    assert not flags
+    assert len(regions) == 1
+    assert regions[0].bbox.x0 == 40
+    assert regions[0].bbox.x1 == 560
+    assert regions[0].bbox.y0 == 95
+    assert regions[0].bbox.y1 == 202
 
 
 def test_record_json_schema_contains_required_fields(tmp_path: Path) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass, field
 from io import BytesIO
+import json
 import re
 from pathlib import Path
 
@@ -226,6 +227,7 @@ def render_mark_scheme_images(
 
             if config.debug.enabled:
                 debug_paths.extend(_write_mark_scheme_debug_overlays(rendered_pages, mark_scheme_pdf, number, layouts, tables, ordered_anchors, regions, zoom, config))
+                debug_paths.append(_write_mark_scheme_debug_metadata(mark_scheme_pdf, number, tables, ordered_anchors, regions, config))
 
             output_path = _mark_scheme_image_path(mark_scheme_pdf, number, config)
             output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -585,7 +587,17 @@ def _table_regions_for_anchor(
                 confidence="low",
             )
 
-        top = anchor.y0 if layout.page_number == anchor.page_number else table.header_bottom
+        if layout.page_number == anchor.page_number:
+            # Each exported mark-scheme image should look like a manual crop of
+            # the original answer table, so include the header row above the
+            # target question row on the first page.
+            top = table.bbox.y0
+        elif table.confidence == "high":
+            # On continuation pages, include the header only when the original
+            # PDF page contains the answer-table header.
+            top = table.bbox.y0
+        else:
+            top = table.header_bottom
         # CAIE mark schemes often show the question number once, then leave the
         # question-number cells blank on continuation rows. Those rows belong to
         # the current question until the next visible question-number anchor.
@@ -593,10 +605,13 @@ def _table_regions_for_anchor(
         bottom = _tighten_table_bottom_from_content(layout, table, top, bottom, config)
         box = BoundingBox(
             table.bbox.x0,
-            max(config.detection.crop_top_margin, top - config.detection.crop_padding),
+            max(config.detection.crop_top_margin, top),
             table.bbox.x1,
             min(layout.height - config.detection.bottom_margin, bottom + config.detection.crop_padding),
         )
+        line_box = _line_based_table_crop(layout, table, box, next_anchor, config)
+        if line_box:
+            box = line_box
         if box.y1 <= box.y0 + 4:
             flags.append("markscheme_image_uncertain")
             continue
@@ -636,6 +651,83 @@ def _tighten_table_bottom_from_content(
     if not boxes:
         return proposed_bottom
     return min(proposed_bottom, max(box.y1 for box in boxes))
+
+
+def _line_based_table_crop(
+    layout: PageLayout,
+    table: MarkSchemeTable,
+    fallback_box: BoundingBox,
+    next_anchor: MarkSchemeAnchor | None,
+    config: AppConfig,
+) -> BoundingBox | None:
+    horizontal = _table_horizontal_rules(layout, table)
+    vertical = _table_vertical_rules(layout, table)
+    if len(horizontal) < 2:
+        return None
+
+    left = min(vertical) if len(vertical) >= 2 else table.bbox.x0
+    right = max(vertical) if len(vertical) >= 2 else table.bbox.x1
+    top = min((y for y in horizontal if y <= table.header_bottom + 2), default=table.bbox.y0)
+
+    if next_anchor and next_anchor.page_number == layout.page_number:
+        bottom_candidates = [y for y in horizontal if fallback_box.y0 < y < next_anchor.y0 - 1]
+        bottom = max(bottom_candidates, default=fallback_box.y1)
+    else:
+        bottom_candidates = [y for y in horizontal if y >= fallback_box.y1 - config.detection.crop_padding - 2]
+        bottom = min(bottom_candidates, default=max(horizontal))
+
+    box = BoundingBox(
+        max(config.detection.crop_left_margin, left),
+        max(config.detection.crop_top_margin, top),
+        min(layout.width - config.detection.crop_right_margin, right),
+        min(layout.height - config.detection.bottom_margin, bottom),
+    )
+    if box.y1 <= box.y0 + 4 or box.x1 <= box.x0 + 4:
+        return None
+    return box
+
+
+def _table_horizontal_rules(layout: PageLayout, table: MarkSchemeTable) -> list[float]:
+    ys: list[float] = []
+    min_width = max(80, (table.bbox.x1 - table.bbox.x0) * 0.45)
+    for graphic in layout.graphics:
+        width = graphic.x1 - graphic.x0
+        height = graphic.y1 - graphic.y0
+        if height > 4 or width < min_width:
+            continue
+        if graphic.x1 < table.bbox.x0 - 8 or graphic.x0 > table.bbox.x1 + 8:
+            continue
+        if graphic.y0 < table.bbox.y0 - 8 or graphic.y1 > table.bbox.y1 + 8:
+            continue
+        ys.extend([graphic.y0, graphic.y1])
+    return _dedupe_positions(ys)
+
+
+def _table_vertical_rules(layout: PageLayout, table: MarkSchemeTable) -> list[float]:
+    xs: list[float] = []
+    min_height = max(60, (table.bbox.y1 - table.bbox.y0) * 0.35)
+    for graphic in layout.graphics:
+        width = graphic.x1 - graphic.x0
+        height = graphic.y1 - graphic.y0
+        if width > 4 or height < min_height:
+            continue
+        if graphic.x0 < table.bbox.x0 - 8 or graphic.x1 > table.bbox.x1 + 8:
+            continue
+        if graphic.y1 < table.bbox.y0 - 8 or graphic.y0 > table.bbox.y1 + 8:
+            continue
+        xs.extend([graphic.x0, graphic.x1])
+    return _dedupe_positions(xs)
+
+
+def _dedupe_positions(values: list[float], tolerance: float = 2.0) -> list[float]:
+    if not values:
+        return []
+    ordered = sorted(values)
+    deduped = [ordered[0]]
+    for value in ordered[1:]:
+        if abs(value - deduped[-1]) > tolerance:
+            deduped.append(value)
+    return deduped
 
 
 def _nearby_anchor_labels(anchors: list[MarkSchemeAnchor], anchor: MarkSchemeAnchor) -> list[str]:
@@ -838,6 +930,60 @@ def _write_mark_scheme_debug_overlays(
             draw.rectangle(_pdf_box_to_pixel_box(region.bbox, zoom, page_image.size), outline="magenta", width=5)
         paths.append(_save_mark_scheme_debug_image(page_image, mark_scheme_pdf, question_number, page_number, "table_crop", config))
     return paths
+
+
+def _write_mark_scheme_debug_metadata(
+    mark_scheme_pdf: Path,
+    question_number: str,
+    tables: dict[int, MarkSchemeTable],
+    anchors: list[MarkSchemeAnchor],
+    regions: list[MarkSchemeCropRegion],
+    config: AppConfig,
+) -> str:
+    config.output.debug_dir.mkdir(parents=True, exist_ok=True)
+    paper_name = _safe_basename(mark_scheme_pdf.stem)
+    qid = f"q{int(question_number):02d}" if question_number.isdigit() else f"q{_safe_basename(question_number)}"
+    path = config.output.debug_dir / f"{paper_name}_ms_{qid}_crop_metadata.json"
+    payload = {
+        "question_number": question_number,
+        "tables": [
+            {
+                "page_number": table.page_number,
+                "bbox": _box_payload(table.bbox),
+                "header_detected": table.header_detected,
+                "header_bottom": table.header_bottom,
+                "question_col_right": table.question_col_right,
+                "confidence": table.confidence,
+            }
+            for table in tables.values()
+        ],
+        "question_number_anchors": [
+            {
+                "question_number": anchor.question_number,
+                "page_number": anchor.page_number,
+                "y0": anchor.y0,
+                "y1": anchor.y1,
+                "x0": anchor.x0,
+                "text": anchor.text,
+                "in_answer_table": bool(anchor.table),
+            }
+            for anchor in anchors
+        ],
+        "selected_row_range": [
+            {
+                "page_number": region.page_number,
+                "crop_box": _box_payload(region.bbox),
+                "table_detected": region.table_detected,
+            }
+            for region in regions
+        ],
+    }
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return _display_path(path)
+
+
+def _box_payload(box: BoundingBox) -> dict[str, float]:
+    return {"x0": box.x0, "y0": box.y0, "x1": box.x1, "y1": box.y1}
 
 
 def _save_mark_scheme_debug_image(
