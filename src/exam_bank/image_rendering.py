@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from io import BytesIO
 from pathlib import Path
 import json
 import re
 
 from .config import AppConfig
+from .image_limits import cap_image_pixels, render_pdf_area
 from .models import BoundingBox, PageLayout, QuestionSpan, RenderResult, TextBlock
+from .mupdf_tools import quiet_mupdf
 from .question_detection import detect_question_anchor_candidates, extract_text_from_blocks, parse_question_start
 
 
@@ -17,6 +18,7 @@ class CropRegion:
     bbox: BoundingBox
     text_blocks: list[TextBlock] = field(default_factory=list)
     graphics: list[BoundingBox] = field(default_factory=list)
+    duplicate_graphics_removed: int = 0
 
 
 def render_question_image(
@@ -43,6 +45,7 @@ def _render_prompt_crop_image(
         from PIL import Image, ImageDraw
     except ImportError as exc:
         raise RuntimeError("PyMuPDF and Pillow are required for rendering screenshots.") from exc
+    quiet_mupdf(fitz)
 
     output_path = _image_output_path(span, config)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -58,39 +61,57 @@ def _render_prompt_crop_image(
         flags.append("crop_uncertain")
         crop_uncertain = True
 
-    zoom = config.detection.render_dpi / 72
-    matrix = fitz.Matrix(zoom, zoom)
     crops = []
     debug_paths: list[str] = []
 
     with fitz.open(pdf_path) as doc:
         rendered_pages = {}
         for region in regions:
-            if region.page_number not in rendered_pages:
-                page = doc[region.page_number - 1]
-                pix = page.get_pixmap(matrix=matrix, alpha=False)
-                page_image = Image.open(BytesIO(pix.tobytes("png"))).convert("RGB")
-                rendered_pages[region.page_number] = page_image
+            page = doc[region.page_number - 1]
+            rect = fitz.Rect(region.bbox.x0, region.bbox.y0, region.bbox.x1, region.bbox.y1)
+            crop, used_zoom = render_pdf_area(
+                page,
+                fitz,
+                dpi=config.detection.render_dpi,
+                source_file=pdf_path,
+                page_number=region.page_number,
+                context=f"question_crop:{span.question_number}",
+                clip=rect,
+            )
+            crops.append(crop)
 
-                if config.debug.enabled and config.debug.save_rendered_pages:
+            if config.debug.enabled and region.page_number not in rendered_pages:
+                page_image, page_zoom = render_pdf_area(
+                    page,
+                    fitz,
+                    dpi=config.detection.render_dpi,
+                    source_file=pdf_path,
+                    page_number=region.page_number,
+                    context=f"question_debug_page:{span.question_number}",
+                )
+                rendered_pages[region.page_number] = (page_image, page_zoom)
+                if config.debug.save_rendered_pages:
                     debug_paths.append(_save_debug_image(page_image, span, region.page_number, "rendered", config))
 
             layout = _layout_by_number(layouts, region.page_number)
-            pixel_box = _pdf_box_to_pixel_box(region.bbox, zoom, rendered_pages[region.page_number].size)
             if _box_height(region.bbox) > layout.height * config.detection.max_crop_height_ratio:
                 flags.extend(["crop_reaches_page_margin", "crop_uncertain"])
                 crop_uncertain = True
 
-            crop = rendered_pages[region.page_number].crop(pixel_box)
-            crops.append(crop)
+            if used_zoom * 72 < config.detection.render_dpi * 0.8:
+                flags.append("render_dpi_capped")
 
         if config.debug.enabled:
-            debug_paths.extend(_write_debug_overlays(rendered_pages, span, layouts, regions, zoom, config))
+            debug_paths.extend(_write_debug_overlays(rendered_pages, span, layouts, regions, config))
 
     if not crops:
         raise RuntimeError(f"No crops could be rendered for {span.paper_name} question {span.question_number}.")
 
-    stitched = _stitch_images(crops, config.detection.stitch_gap_px)
+    stitched = cap_image_pixels(
+        _stitch_images(crops, config.detection.stitch_gap_px),
+        source_file=pdf_path,
+        context=f"question_output:{span.question_number}",
+    )
     stitched.save(output_path)
 
     if config.debug.enabled:
@@ -99,12 +120,14 @@ def _render_prompt_crop_image(
     crop_uncertain = crop_uncertain or "crop_uncertain" in flags
     extracted_text = _text_from_regions(regions) or span.combined_text
     flags = sorted(set(flags))
+    crop_diagnostics = _crop_diagnostics(pdf_path, span, regions, flags)
     return RenderResult(
         screenshot_path=output_path,
         review_flags=flags,
         crop_uncertain=crop_uncertain,
         debug_paths=debug_paths,
         extracted_text=extracted_text,
+        crop_diagnostics=crop_diagnostics,
     )
 
 
@@ -115,6 +138,7 @@ def _detect_prompt_regions(
 ) -> tuple[list[CropRegion], list[str]]:
     regions: list[CropRegion] = []
     flags: list[str] = []
+    seen_graphics: dict[int, list[BoundingBox]] = {}
 
     for page_number in span.page_numbers:
         layout = _layout_by_number(layouts, page_number)
@@ -132,13 +156,24 @@ def _detect_prompt_regions(
 
         for segment in segments:
             text_box = _union_boxes([block.bbox for block in segment])
-            graphics = _graphics_for_segment(text_box, layout, config)
+            raw_graphics = _graphics_for_segment(text_box, layout, config)
+            graphics, duplicate_count = _dedupe_graphics(raw_graphics, seen_graphics.setdefault(page_number, []))
+            if duplicate_count:
+                flags.append("duplicate_visual_regions_removed")
             boxes = [text_box] + graphics
             crop_box = _union_boxes(boxes).padded(config.detection.crop_padding, layout.width, layout.height)
             crop_box = _clamp_crop_to_prompt_area(crop_box, layout, config)
             if _box_height(crop_box) < config.detection.min_crop_height:
                 flags.append("crop_uncertain")
-            regions.append(CropRegion(page_number=page_number, bbox=crop_box, text_blocks=segment, graphics=graphics))
+            regions.append(
+                CropRegion(
+                    page_number=page_number,
+                    bbox=crop_box,
+                    text_blocks=segment,
+                    graphics=graphics,
+                    duplicate_graphics_removed=duplicate_count,
+                )
+            )
 
     return regions, sorted(set(flags))
 
@@ -231,11 +266,10 @@ def _render_full_region_image(
         from PIL import Image
     except ImportError as exc:
         raise RuntimeError("PyMuPDF and Pillow are required for rendering screenshots.") from exc
+    quiet_mupdf(fitz)
 
     output_path = _image_output_path(span, config)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    zoom = config.detection.render_dpi / 72
-    matrix = fitz.Matrix(zoom, zoom)
     images: list[Image.Image] = []
     regions: list[CropRegion] = []
     debug_paths: list[str] = []
@@ -249,22 +283,42 @@ def _render_full_region_image(
                 continue
             regions.append(CropRegion(page_number=page_number, bbox=crop, text_blocks=[block for block in span.blocks if block.page_number == page_number]))
             page = doc[page_number - 1]
-            if page_number not in rendered_pages:
-                pix_full = page.get_pixmap(matrix=matrix, alpha=False)
-                rendered_pages[page_number] = Image.open(BytesIO(pix_full.tobytes("png"))).convert("RGB")
-                if config.debug.enabled and config.debug.save_rendered_pages:
-                    debug_paths.append(_save_debug_image(rendered_pages[page_number], span, page_number, "rendered", config))
             rect = fitz.Rect(crop.x0, crop.y0, crop.x1, crop.y1)
-            pix = page.get_pixmap(matrix=matrix, clip=rect, alpha=False)
-            images.append(Image.open(BytesIO(pix.tobytes("png"))).convert("RGB"))
+            image, used_zoom = render_pdf_area(
+                page,
+                fitz,
+                dpi=config.detection.render_dpi,
+                source_file=pdf_path,
+                page_number=page_number,
+                context=f"question_full_region:{span.question_number}",
+                clip=rect,
+            )
+            images.append(image)
+            if config.debug.enabled and page_number not in rendered_pages:
+                page_image, page_zoom = render_pdf_area(
+                    page,
+                    fitz,
+                    dpi=config.detection.render_dpi,
+                    source_file=pdf_path,
+                    page_number=page_number,
+                    context=f"question_debug_page:{span.question_number}",
+                )
+                rendered_pages[page_number] = (page_image, page_zoom)
+                if config.debug.save_rendered_pages:
+                    debug_paths.append(_save_debug_image(page_image, span, page_number, "rendered", config))
 
         if config.debug.enabled:
-            debug_paths.extend(_write_debug_overlays(rendered_pages, span, layouts, regions, zoom, config))
+            debug_paths.extend(_write_debug_overlays(rendered_pages, span, layouts, regions, config))
 
     if not images:
         return RenderResult(output_path, ["crop_fallback_failed", "crop_uncertain"], crop_uncertain=True)
 
-    _stitch_images(images, config.detection.stitch_gap_px).save(output_path)
+    stitched = cap_image_pixels(
+        _stitch_images(images, config.detection.stitch_gap_px),
+        source_file=pdf_path,
+        context=f"question_full_region_output:{span.question_number}",
+    )
+    stitched.save(output_path)
     if config.debug.enabled:
         debug_paths.append(_write_crop_metadata(span, regions, ["full_region_mode"], config))
     return RenderResult(output_path, debug_paths=debug_paths, extracted_text=span.combined_text)
@@ -287,17 +341,16 @@ def _full_region_crop_for_page(layout: PageLayout, span: QuestionSpan, config: A
 
 
 def _write_debug_overlays(
-    rendered_pages: dict[int, "Image.Image"],
+    rendered_pages: dict[int, tuple["Image.Image", float]],
     span: QuestionSpan,
     layouts: list[PageLayout],
     regions: list[CropRegion],
-    zoom: float,
     config: AppConfig,
 ) -> list[str]:
     from PIL import ImageDraw
 
     paths: list[str] = []
-    for page_number, page_image in rendered_pages.items():
+    for page_number, (page_image, zoom) in rendered_pages.items():
         layout = _layout_by_number(layouts, page_number)
         anchors = [
             anchor
@@ -365,7 +418,9 @@ def _write_crop_metadata(span: QuestionSpan, regions: list[CropRegion], flags: l
                     "y1": round(region.bbox.y1, 2),
                 },
                 "text_blocks": [block.text for block in region.text_blocks],
+                "merged_blocks": len(region.text_blocks),
                 "graphics_count": len(region.graphics),
+                "duplicate_graphics_removed": region.duplicate_graphics_removed,
             }
             for region in regions
         ],
@@ -431,6 +486,39 @@ def _union_boxes(boxes: list[BoundingBox]) -> BoundingBox:
     )
 
 
+def _dedupe_graphics(boxes: list[BoundingBox], seen: list[BoundingBox]) -> tuple[list[BoundingBox], int]:
+    kept: list[BoundingBox] = []
+    removed = 0
+    for box in sorted(boxes, key=lambda item: (_box_area(item), item.y0, item.x0), reverse=True):
+        if any(_boxes_duplicate(box, other) for other in kept) or any(_boxes_duplicate(box, other) for other in seen):
+            removed += 1
+            continue
+        kept.append(box)
+        seen.append(box)
+    return sorted(kept, key=lambda item: (item.y0, item.x0)), removed
+
+
+def _boxes_duplicate(a: BoundingBox, b: BoundingBox) -> bool:
+    if _intersection_area(a, b) / max(1.0, min(_box_area(a), _box_area(b))) >= 0.88:
+        return True
+    return (
+        abs(a.x0 - b.x0) <= 3
+        and abs(a.y0 - b.y0) <= 3
+        and abs(a.x1 - b.x1) <= 3
+        and abs(a.y1 - b.y1) <= 3
+    )
+
+
+def _intersection_area(a: BoundingBox, b: BoundingBox) -> float:
+    width = max(0.0, min(a.x1, b.x1) - max(a.x0, b.x0))
+    height = max(0.0, min(a.y1, b.y1) - max(a.y0, b.y0))
+    return width * height
+
+
+def _box_area(box: BoundingBox) -> float:
+    return max(0.0, box.x1 - box.x0) * max(0.0, box.y1 - box.y0)
+
+
 def _is_footer_or_header_box(box: BoundingBox, layout: PageLayout, config: AppConfig) -> bool:
     return box.y1 < config.detection.crop_top_margin or box.y0 > layout.height - config.detection.bottom_margin
 
@@ -468,11 +556,15 @@ def _is_in_answer_rule_band(box: BoundingBox, bands: list[float]) -> bool:
 
 def _is_boilerplate_text(text: str) -> bool:
     patterns = [
+        r"^Additional Page\b",
+        r"If you use the following lined page",
+        r"write the question number",
         r"^©\s*UCLES\b",
         r"^UCLES\b",
         r"^\d{4}/\d{2}/[A-Z]/[A-Z]/\d{2}$",
         r"^9709[/_ -]",
         r"^Cambridge International",
+        r"DO NOT WRITE IN THIS MARGIN",
         r"^This document consists of",
         r"^BLANK PAGE$",
         r"^Question Paper$",
@@ -520,6 +612,37 @@ def _image_output_path(span: QuestionSpan, config: AppConfig) -> Path:
     else:
         filename = f"{span.paper_name}_q{span.question_number}.png"
     return config.output.images_dir / filename
+
+
+def _crop_diagnostics(
+    pdf_path: str | Path,
+    span: QuestionSpan,
+    regions: list[CropRegion],
+    flags: list[str],
+) -> dict[str, object]:
+    return {
+        "source_file": str(pdf_path),
+        "question_id": span.question_number,
+        "flags": sorted(set(flags)),
+        "merged_blocks": sum(len(region.text_blocks) for region in regions),
+        "duplicate_visual_blocks_removed": sum(region.duplicate_graphics_removed for region in regions),
+        "excluded_boilerplate_reasons": sorted(flag.replace("excluded_boilerplate_", "") for flag in flags if flag.startswith("excluded_boilerplate_")),
+        "regions": [
+            {
+                "page_number": region.page_number,
+                "final_crop_bbox": {
+                    "x0": round(region.bbox.x0, 2),
+                    "y0": round(region.bbox.y0, 2),
+                    "x1": round(region.bbox.x1, 2),
+                    "y1": round(region.bbox.y1, 2),
+                },
+                "merged_blocks": len(region.text_blocks),
+                "graphics_count": len(region.graphics),
+                "duplicate_visual_blocks_removed": region.duplicate_graphics_removed,
+            }
+            for region in regions
+        ],
+    }
 
 
 def _layout_by_number(layouts: list[PageLayout], page_number: int) -> PageLayout:

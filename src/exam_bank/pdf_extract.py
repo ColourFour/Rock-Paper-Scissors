@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 from .config import AppConfig
+from .image_limits import render_pdf_area
 from .models import BoundingBox, PageLayout, TextBlock
+from .mupdf_tools import quiet_mupdf
 
 
 def extract_pdf_layout(pdf_path: str | Path, config: AppConfig, use_ocr: bool | None = None) -> list[PageLayout]:
@@ -20,6 +21,7 @@ def extract_pdf_layout(pdf_path: str | Path, config: AppConfig, use_ocr: bool | 
         import fitz
     except ImportError as exc:
         raise RuntimeError("PyMuPDF is required for PDF extraction. Install requirements.txt first.") from exc
+    quiet_mupdf(fitz)
 
     pdf_path = Path(pdf_path)
     layouts: list[PageLayout] = []
@@ -257,11 +259,16 @@ def _ocr_page(page: Any, page_number: int, config: AppConfig) -> list[TextBlock]
         from PIL import Image
     except ImportError as exc:
         raise RuntimeError("pytesseract and Pillow are required for OCR fallback.") from exc
+    quiet_mupdf(fitz)
 
-    zoom = config.ocr.dpi / 72
-    matrix = fitz.Matrix(zoom, zoom)
-    pix = page.get_pixmap(matrix=matrix, alpha=False)
-    image = Image.open(BytesIO(pix.tobytes("png"))).convert("RGB")
+    image, _used_zoom = render_pdf_area(
+        page,
+        fitz,
+        dpi=config.ocr.dpi,
+        source_file=getattr(page.parent, "name", "<pdf>"),
+        page_number=page_number,
+        context="ocr_page",
+    )
     data = pytesseract.image_to_data(
         image,
         lang=config.ocr.language,

@@ -102,6 +102,8 @@ Then run:
 python -m exam_bank.cli process --config config.yaml
 ```
 
+The batch command now builds a filename metadata registry before opening PDFs. Files are routed by document type from the filename, so question papers enter question extraction, mark schemes enter mark-scheme extraction only as paired companions, and examiner reports are attached as session-level evidence where available.
+
 To build topic PDF packs as part of the batch:
 
 ```bash
@@ -113,13 +115,35 @@ You can also enable this permanently in `config.yaml` with:
 ```yaml
 topic_pdfs:
   enable_topic_pdfs: true
+  include_mark_scheme_link: true
 ```
+
+When `include_mark_scheme_link` is enabled, each question in a topic PDF includes an
+`Open mark scheme image` link plus the visible relative image path as a fallback.
+Keep `output/topic_pdfs/` and the image folders together so links like
+`../images/...png` or `../markschemes/...png` continue to resolve when shared.
 
 The pipeline auto-pairs files like:
 
 ```text
 March 2019_qp_32.pdf -> March 2019_ms_32.pdf
 ```
+
+It also understands full Cambridge-style names such as:
+
+```text
+9709 Mathematics November 2025 Question Paper 12.pdf
+9709 Mathematics November 2025 Mark Scheme 12.pdf
+9709 Mathematics November 2025 Examiner Report.pdf
+```
+
+For a single uploaded folder containing mixed QP/MS/ER PDFs, use:
+
+```bash
+python -m exam_bank.cli process-folder --config config.yaml --input-folder path/to/pdf-folder
+```
+
+The registry key is `{syllabus}_{year}_{session}_{component}`, for example `9709_2025_November_12`. Examiner reports without a component number are treated as session-level files and attached to matching components from the same syllabus, year, and session.
 
 For exceptions, add a CSV file under `input/mappings/`, for example `input/mappings/pairs.csv`:
 
@@ -180,10 +204,34 @@ output/qa/qa_report.csv
 output/qa/review.html
 ```
 
-The review page is static. Serve the repo root locally, then open:
+The review page is fully static and embeds the QA report payload, so no local server is needed. On macOS, open it with:
 
-```text
-http://localhost:8000/output/qa/review.html
+```bash
+python -m exam_bank.cli open-qa --config config.yaml
+```
+
+or:
+
+```bash
+open output/qa/review.html
+```
+
+Do not type `output/qa/review.html` directly into zsh; that asks the shell to execute the file and will usually produce `permission denied`.
+
+If you intentionally start a local server for another reason and port 8000 is busy, use a different port:
+
+```bash
+python3 -m http.server 8001
+```
+
+QA JSON summaries include `flag_counts`, `warning_flag_counts`, `fail_flag_counts`, `top_warning_reason`, and `top_fail_reason` so the most common problems are visible without hand-counting records.
+
+## Open Review Output
+
+To open the main review CSV:
+
+```bash
+python -m exam_bank.cli open-review --config config.yaml
 ```
 
 ## Student Practice Page
@@ -359,6 +407,7 @@ Topic PDF layout can be tuned in `config.yaml`:
 topic_pdfs:
   enable_topic_pdfs: false
   topic_pdf_output_dir: output/topic_pdfs
+  include_mark_scheme_link: true
   page_size: A4
   margin: 42
   image_max_width: 500

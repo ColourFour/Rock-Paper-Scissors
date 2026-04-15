@@ -164,3 +164,103 @@ def test_qa_only_failed_filters_written_records(tmp_path: Path) -> None:
     assert result.summary["written_record_count"] == 1
     assert len(payload["records"]) == 1
     assert payload["records"][0]["qa_status"] == "fail"
+
+
+def test_qa_summary_counts_flags_and_embeds_static_payload(tmp_path: Path) -> None:
+    source_pdf = tmp_path / "9709_s21_qp_12.pdf"
+    source_pdf.write_bytes(b"%PDF-1.4\n")
+    question_image = tmp_path / "question.png"
+    markscheme_image = tmp_path / "markscheme.png"
+    _write_image(question_image)
+    _write_image(markscheme_image)
+
+    question_bank = tmp_path / "question_bank.json"
+    question_bank.write_text(
+        json.dumps(
+            [
+                {
+                    "source_pdf": str(source_pdf),
+                    "question_number": "1",
+                    "paper_family": "P1",
+                    "source_paper_family": "P1",
+                    "topic": "quadratics",
+                    "question_image": str(question_image),
+                    "markscheme_image": str(markscheme_image),
+                    "question_crop_confidence": "medium",
+                    "markscheme_crop_confidence": "medium",
+                    "markscheme_table_detected": True,
+                    "markscheme_table_header_ok": True,
+                    "markscheme_question_number": "1",
+                    "markscheme_nearby_anchors": ["1"],
+                    "review_flags": [],
+                },
+                {
+                    "source_pdf": str(source_pdf),
+                    "question_number": "",
+                    "paper_family": "P1",
+                    "topic": "quadratics",
+                    "question_image": str(question_image),
+                    "markscheme_image": str(markscheme_image),
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_qa(question_bank, tmp_path / "qa")
+    review_html = result.review_path.read_text(encoding="utf-8")
+
+    assert result.summary["status_counts"] == {"pass": 1, "warning": 0, "fail": 1}
+    assert result.summary["top_fail_reason"] == {"flag": "record_incomplete", "count": 1}
+    assert result.summary["flag_counts"]["missing_question_number"] == 1
+    assert 'id="qaPayload"' in review_html
+    assert "qa_report.json" in review_html
+
+
+def test_qa_surfaces_question_crop_artifact_flags(tmp_path: Path) -> None:
+    source_pdf = tmp_path / "9709_s21_qp_12.pdf"
+    source_pdf.write_bytes(b"%PDF-1.4\n")
+    question_image = tmp_path / "question.png"
+    markscheme_image = tmp_path / "markscheme.png"
+    _write_image(question_image)
+    _write_image(markscheme_image)
+
+    question_bank = tmp_path / "question_bank.json"
+    question_bank.write_text(
+        json.dumps(
+            [
+                {
+                    "source_pdf": str(source_pdf),
+                    "question_number": "1",
+                    "paper_family": "P1",
+                    "source_paper_family": "P1",
+                    "topic": "quadratics",
+                    "question_image": str(question_image),
+                    "markscheme_image": str(markscheme_image),
+                    "question_crop_confidence": "high",
+                    "markscheme_crop_confidence": "high",
+                    "markscheme_table_detected": True,
+                    "markscheme_table_header_ok": True,
+                    "markscheme_question_number": "1",
+                    "markscheme_nearby_anchors": ["1"],
+                    "combined_question_text": "1 Solve the equation. [2]",
+                    "review_flags": [
+                        "excluded_boilerplate_additional_page",
+                        "excluded_boilerplate_copyright_footer",
+                        "duplicate_visual_regions_removed",
+                        "answer_line_space_excluded",
+                    ],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_qa(question_bank, tmp_path / "qa")
+    flags = set(result.records[0]["qa_flags"])
+
+    assert result.records[0]["qa_status"] == "warning"
+    assert "possible_additional_page_in_question_crop" in flags
+    assert "possible_copyright_in_question_crop" in flags
+    assert "duplicate_visual_regions_detected" in flags
+    assert "possible_answer_line_space_in_question_crop" in flags

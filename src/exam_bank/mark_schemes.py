@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import csv
 from dataclasses import dataclass, field
-from io import BytesIO
 import json
 import re
 from pathlib import Path
 
 from .config import AppConfig
 from .document_metadata import companion_candidates, parse_filename_metadata
+from .image_limits import cap_image_pixels, render_pdf_area
 from .identifiers import normalize_question_id, parent_question_id
 from .models import BoundingBox, PageLayout, QuestionStart, TextBlock
+from .mupdf_tools import quiet_mupdf
 from .pdf_extract import extract_pdf_layout
 from .question_detection import parse_question_start
 
@@ -146,6 +147,7 @@ def render_mark_scheme_images(
         from PIL import Image
     except ImportError as exc:
         raise RuntimeError("PyMuPDF and Pillow are required for mark-scheme image export.") from exc
+    quiet_mupdf(fitz)
 
     mark_scheme_pdf = Path(mark_scheme_pdf)
     layouts = extract_pdf_layout(mark_scheme_pdf, config)
@@ -168,9 +170,6 @@ def render_mark_scheme_images(
         }
 
     output: dict[str, MarkSchemeImageResult] = {}
-    zoom = config.detection.render_dpi / 72
-    matrix = fitz.Matrix(zoom, zoom)
-
     with fitz.open(mark_scheme_pdf) as doc:
         rendered_pages = {}
         ordered_anchors = sorted(anchors, key=lambda item: (item.page_number, item.y0))
@@ -237,14 +236,33 @@ def render_mark_scheme_images(
             for region in regions:
                 page_number = region.page_number
                 box = region.bbox
-                if page_number not in rendered_pages:
-                    page = doc[page_number - 1]
-                    pix = page.get_pixmap(matrix=matrix, alpha=False)
-                    rendered_pages[page_number] = Image.open(BytesIO(pix.tobytes("png"))).convert("RGB")
-                    if config.debug.enabled and config.debug.save_rendered_pages:
-                        debug_paths.append(_save_mark_scheme_debug_image(rendered_pages[page_number], mark_scheme_pdf, number, page_number, "rendered", config))
-                crop_box = _pdf_box_to_pixel_box(box, zoom, rendered_pages[page_number].size)
-                crops.append(rendered_pages[page_number].crop(crop_box))
+                page = doc[page_number - 1]
+                rect = fitz.Rect(box.x0, box.y0, box.x1, box.y1)
+                crop, used_zoom = render_pdf_area(
+                    page,
+                    fitz,
+                    dpi=config.detection.render_dpi,
+                    source_file=mark_scheme_pdf,
+                    page_number=page_number,
+                    context=f"markscheme_crop:{number}",
+                    clip=rect,
+                )
+                crops.append(crop)
+                if used_zoom * 72 < config.detection.render_dpi * 0.8:
+                    flags.append("markscheme_render_dpi_capped")
+
+                if config.debug.enabled and page_number not in rendered_pages:
+                    page_image, page_zoom = render_pdf_area(
+                        page,
+                        fitz,
+                        dpi=config.detection.render_dpi,
+                        source_file=mark_scheme_pdf,
+                        page_number=page_number,
+                        context=f"markscheme_debug_page:{number}",
+                    )
+                    rendered_pages[page_number] = (page_image, page_zoom)
+                    if config.debug.save_rendered_pages:
+                        debug_paths.append(_save_mark_scheme_debug_image(page_image, mark_scheme_pdf, number, page_number, "rendered", config))
 
             if not crops:
                 output[number] = MarkSchemeImageResult(
@@ -261,12 +279,17 @@ def render_mark_scheme_images(
                 continue
 
             if config.debug.enabled:
-                debug_paths.extend(_write_mark_scheme_debug_overlays(rendered_pages, mark_scheme_pdf, number, layouts, tables, ordered_anchors, regions, zoom, config))
+                debug_paths.extend(_write_mark_scheme_debug_overlays(rendered_pages, mark_scheme_pdf, number, layouts, tables, ordered_anchors, regions, config))
                 debug_paths.append(_write_mark_scheme_debug_metadata(mark_scheme_pdf, number, tables, ordered_anchors, regions, config))
 
             output_path = _mark_scheme_image_path(mark_scheme_pdf, number, config)
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            _stitch_images(crops, config.detection.stitch_gap_px).save(output_path)
+            stitched = cap_image_pixels(
+                _stitch_images(crops, config.detection.stitch_gap_px),
+                source_file=mark_scheme_pdf,
+                context=f"markscheme_output:{number}",
+            )
+            stitched.save(output_path)
             confidence = _mark_scheme_crop_confidence(regions, layouts, flags)
             output[number] = MarkSchemeImageResult(
                 question_number=number,
@@ -958,20 +981,19 @@ def _clean_cell_text(text: str) -> str:
 
 
 def _write_mark_scheme_debug_overlays(
-    rendered_pages: dict[int, "Image.Image"],
+    rendered_pages: dict[int, tuple["Image.Image", float]],
     mark_scheme_pdf: Path,
     question_number: str,
     layouts: list[PageLayout],
     tables: dict[int, MarkSchemeTable],
     anchors: list[MarkSchemeAnchor],
     regions: list[MarkSchemeCropRegion],
-    zoom: float,
     config: AppConfig,
 ) -> list[str]:
     from PIL import ImageDraw
 
     paths: list[str] = []
-    for page_number, image in rendered_pages.items():
+    for page_number, (image, zoom) in rendered_pages.items():
         if not any(region.page_number == page_number for region in regions):
             continue
         page_image = image.copy()

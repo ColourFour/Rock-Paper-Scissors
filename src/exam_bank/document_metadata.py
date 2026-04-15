@@ -21,33 +21,48 @@ SESSION_ALIASES = {
     "w": "OctNov",
     "winter": "OctNov",
     "oct": "OctNov",
-    "nov": "OctNov",
+    "october": "October",
+    "nov": "November",
+    "november": "November",
     "octnov": "OctNov",
     "oct_nov": "OctNov",
+    "october_november": "OctNov",
     "on": "OctNov",
 }
 
 DOCUMENT_TYPE_ALIASES = {
-    "qp": "QP",
-    "questionpaper": "QP",
+    "qp": "question_paper",
+    "questionpaper": "question_paper",
+    "question_paper": "question_paper",
+    "question": "question_paper",
+    "ms": "mark_scheme",
+    "markscheme": "mark_scheme",
+    "mark_scheme": "mark_scheme",
+    "scheme": "mark_scheme",
+    "er": "examiner_report",
+    "examinerreport": "examiner_report",
+    "examiner_report": "examiner_report",
+    "report": "examiner_report",
+}
+
+COMPACT_DOCUMENT_TYPES = {
     "question_paper": "QP",
-    "question": "QP",
-    "ms": "MS",
-    "markscheme": "MS",
     "mark_scheme": "MS",
-    "scheme": "MS",
-    "er": "ER",
-    "examinerreport": "ER",
     "examiner_report": "ER",
-    "report": "ER",
+    "QP": "QP",
+    "MS": "MS",
+    "ER": "ER",
 }
 
 
 @dataclass(frozen=True)
 class DocumentMetadata:
     syllabus: str = ""
+    subject: str = ""
     year: str = ""
     session: str = ""
+    original_session_label: str = ""
+    normalized_session_key: str = ""
     document_type: str = ""
     component: str = ""
     source: str = ""
@@ -59,15 +74,30 @@ class DocumentMetadata:
 
     @property
     def canonical_key(self) -> str:
-        if not (self.syllabus and self.year and self.session and self.component):
+        session = self.normalized_session_key or self.session
+        if not (self.syllabus and self.year and session and self.component):
             return ""
-        return f"{self.syllabus}_{self.year}_{self.session}_{self.component}"
+        return f"{self.syllabus}_{self.year}_{session}_{self.component}"
+
+    @property
+    def session_key(self) -> str:
+        session = self.normalized_session_key or self.session
+        if not (self.syllabus and self.year and session):
+            return ""
+        return f"{self.syllabus}_{self.year}_{session}"
+
+    @property
+    def compact_document_type(self) -> str:
+        return COMPACT_DOCUMENT_TYPES.get(self.document_type, self.document_type)
 
     def with_document_type(self, document_type: str) -> "DocumentMetadata":
         return DocumentMetadata(
             syllabus=self.syllabus,
+            subject=self.subject,
             year=self.year,
             session=self.session,
+            original_session_label=self.original_session_label,
+            normalized_session_key=self.normalized_session_key,
             document_type=document_type,
             component=self.component,
             source=self.source,
@@ -85,6 +115,7 @@ def parse_filename_metadata(path: str | Path) -> DocumentMetadata:
     document_type = _document_type_from_tokens(tokens)
     component = _component_from_tokens(tokens, document_type)
     session, year = _session_year_from_tokens(tokens)
+    subject = _subject_from_tokens(tokens)
 
     if not year:
         year_match = re.search(r"\b(20\d{2}|\d{2})\b", stem)
@@ -95,8 +126,11 @@ def parse_filename_metadata(path: str | Path) -> DocumentMetadata:
 
     return DocumentMetadata(
         syllabus=syllabus,
+        subject=subject,
         year=year,
         session=session,
+        original_session_label=session,
+        normalized_session_key=session,
         document_type=document_type,
         component=component,
         source="filename",
@@ -126,11 +160,11 @@ def parse_internal_document_metadata(layouts: list[PageLayout]) -> DocumentMetad
 
     document_type = ""
     if re.search(r"\bmark scheme\b", cover_text, re.IGNORECASE):
-        document_type = "MS"
+        document_type = "mark_scheme"
     elif re.search(r"\bexaminer(?:'s)? report\b|\bprincipal examiner\b", cover_text, re.IGNORECASE):
-        document_type = "ER"
+        document_type = "examiner_report"
     elif re.search(r"\bquestion paper\b", cover_text, re.IGNORECASE):
-        document_type = "QP"
+        document_type = "question_paper"
 
     session = _session_from_text(cover_text)
     year = ""
@@ -146,6 +180,8 @@ def parse_internal_document_metadata(layouts: list[PageLayout]) -> DocumentMetad
         syllabus=syllabus,
         year=year,
         session=session,
+        original_session_label=session,
+        normalized_session_key=session,
         document_type=document_type,
         component=component,
         source="internal",
@@ -164,8 +200,11 @@ def reconcile_document_metadata(filename: DocumentMetadata, internal: DocumentMe
 
     return DocumentMetadata(
         syllabus=choose("syllabus"),
+        subject=filename.subject or internal.subject,
         year=choose("year"),
         session=choose("session"),
+        original_session_label=choose("original_session_label"),
+        normalized_session_key=choose("normalized_session_key"),
         document_type=choose("document_type"),
         component=choose("component"),
         source="internal" if any(getattr(internal, field) for field in ["syllabus", "year", "session", "document_type", "component"]) else "filename",
@@ -182,9 +221,13 @@ def companion_candidates(document: DocumentMetadata, directory: str | Path, docu
         if not path.is_file():
             continue
         metadata = parse_filename_metadata(path)
-        if metadata.canonical_key and metadata.canonical_key == document.canonical_key and metadata.document_type == document_type:
+        if metadata.canonical_key and metadata.canonical_key == document.canonical_key and _document_type_matches(metadata.document_type, document_type):
             candidates.append(path)
     return candidates
+
+
+def _document_type_matches(actual: str, expected: str) -> bool:
+    return actual == expected or COMPACT_DOCUMENT_TYPES.get(actual) == expected or COMPACT_DOCUMENT_TYPES.get(expected) == actual
 
 
 def _normalize_name(value: str) -> str:
@@ -203,6 +246,14 @@ def _first_match(tokens: list[str], pattern: str) -> str:
 
 def _document_type_from_tokens(tokens: list[str]) -> str:
     joined = "_".join(tokens)
+    phrase_checks = [
+        ("question_paper", "question_paper"),
+        ("mark_scheme", "mark_scheme"),
+        ("examiner_report", "examiner_report"),
+    ]
+    for phrase, value in phrase_checks:
+        if phrase in joined:
+            return value
     for key, value in DOCUMENT_TYPE_ALIASES.items():
         if key in tokens or key in joined:
             return value
@@ -210,11 +261,10 @@ def _document_type_from_tokens(tokens: list[str]) -> str:
 
 
 def _component_from_tokens(tokens: list[str], document_type: str) -> str:
-    if document_type:
-        lowered = document_type.lower()
-        for index, token in enumerate(tokens):
-            if token == lowered and index + 1 < len(tokens) and re.fullmatch(r"[1-6][0-9]", tokens[index + 1]):
-                return tokens[index + 1]
+    if document_type == "examiner_report":
+        return ""
+    if tokens and re.fullmatch(r"[1-6][0-9]", tokens[-1]):
+        return tokens[-1]
     for token in reversed(tokens):
         if re.fullmatch(r"[1-6][0-9]", token):
             return token
@@ -222,6 +272,16 @@ def _component_from_tokens(tokens: list[str], document_type: str) -> str:
 
 
 def _session_year_from_tokens(tokens: list[str]) -> tuple[str, str]:
+    joined = "_".join(tokens)
+    phrase_session = _session_from_text(joined)
+    if phrase_session:
+        year = ""
+        for token in tokens:
+            if re.fullmatch(r"20\d{2}|\d{2}", token):
+                year = _normalize_year(token)
+                break
+        return phrase_session, year
+
     for token in tokens:
         compact = re.fullmatch(r"([msw])(\d{2})", token)
         if compact:
@@ -245,11 +305,21 @@ def _normalize_year(value: str) -> str:
 
 def _session_from_text(value: str) -> str:
     normalized = _normalize_name(value)
+    if re.search(r"february_?march|feb_?march", normalized):
+        return "March"
+    if re.search(r"may_?june", normalized):
+        return "MayJune"
+    if re.search(r"october_?november|oct_?nov", normalized):
+        return "OctNov"
     for token, session in SESSION_ALIASES.items():
         if re.search(rf"(?:^|_){re.escape(token)}(?:_|$)", normalized):
             return session
-    if re.search(r"may_?june", normalized):
-        return "MayJune"
-    if re.search(r"oct_?nov", normalized):
-        return "OctNov"
+    return ""
+
+
+def _subject_from_tokens(tokens: list[str]) -> str:
+    if "mathematics" in tokens:
+        return "Mathematics"
+    if "maths" in tokens:
+        return "Mathematics"
     return ""

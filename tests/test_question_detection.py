@@ -464,3 +464,146 @@ def test_prompt_crop_regions_split_large_answer_space_and_skip_next_question() -
     rendered_text = "\n".join(block.text for region in regions for block in region.text_blocks)
     assert "Start of the next question" not in rendered_text
     assert "Turn over" not in rendered_text
+
+
+def test_question_span_stops_before_additional_page_boilerplate() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "1 Solve the equation. [3]", 100),
+            block(1, "Show your working clearly.", 130),
+            block(1, "Additional Page", 300),
+            block(1, "If you use the following lined page to complete the answer, write the question number.", 330),
+            block(1, "Unrelated lower-page content", 380),
+        ],
+    )
+
+    span = detect_question_spans([layout], Path("paper_qp.pdf"), config)[0]
+
+    assert "Additional Page" not in span.combined_text
+    assert "Unrelated lower-page content" not in span.combined_text
+    assert "excluded_boilerplate_additional_page" in span.review_flags
+
+
+def test_question_starts_reject_impossible_component_question_numbers() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "1 Start of mechanics paper. [3]", 100),
+            block(1, "30 This is a footer or total mark artefact", 620),
+        ],
+    )
+
+    spans = detect_question_spans([layout], Path("9709 Mathematics June 2025 Question Paper  41.pdf"), config)
+
+    assert len(spans) == 1
+    assert spans[0].question_number == "1"
+    assert "30 This is a footer" not in spans[0].combined_text
+
+
+def test_question_starts_ignore_cover_page_number_before_question_one() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "9", 100),
+            block(1, "You will need: List of formulae (MF19)", 125),
+            block(1, "1 Solve the equation. [3]", 300),
+            block(1, "2 Differentiate x^2. [2]", 430),
+        ],
+    )
+
+    spans = detect_question_spans([layout], Path("9709 Mathematics November 2025 Question Paper  12.pdf"), config)
+
+    assert [span.question_number for span in spans] == ["1", "2"]
+    assert "You will need" not in spans[0].combined_text
+
+
+def test_question_detection_skips_cover_instruction_page_anchors() -> None:
+    config = AppConfig()
+    cover = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "7", 100),
+            block(1, "* You will need: List of formulae (MF19)", 125),
+            block(1, "INSTRUCTIONS", 180),
+            block(1, "Answer all questions.", 205),
+            block(1, "INFORMATION", 260),
+            block(1, "The total mark for this paper is 50.", 285),
+        ],
+    )
+    question_page = PageLayout(
+        page_number=2,
+        width=595,
+        height=842,
+        blocks=[
+            block(2, "1 Find the probability. [3]", 100),
+            block(2, "2 Find the mean. [4]", 240),
+        ],
+    )
+
+    spans = detect_question_spans([cover, question_page], Path("9709 Mathematics November 2025 Question Paper  55.pdf"), config)
+
+    assert [span.question_number for span in spans] == ["1", "2"]
+    assert "INSTRUCTIONS" not in spans[0].combined_text
+
+
+def test_question_span_excludes_lined_answer_page_region() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "1 Find the value of k. [4]", 100),
+            block(1, "Use exact values.", 130),
+            block(1, "This text after the answer lines is boilerplate.", 360),
+        ],
+        graphics=[
+            BoundingBox(45, 210, 545, 211),
+            BoundingBox(45, 235, 545, 236),
+            BoundingBox(45, 260, 545, 261),
+            BoundingBox(45, 285, 545, 286),
+            BoundingBox(45, 310, 545, 311),
+        ],
+    )
+
+    span = detect_question_spans([layout], Path("paper_qp.pdf"), config)[0]
+
+    assert "answer_line_space_excluded" in span.review_flags
+    assert "This text after the answer lines" not in span.combined_text
+
+
+def test_prompt_crop_deduplicates_overlapping_visual_regions() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "1 The diagram shows a curve. [3]", 100),
+            block(1, "Find the area under the curve.", 170),
+        ],
+        graphics=[
+            BoundingBox(100, 120, 320, 250),
+            BoundingBox(101, 121, 321, 251),
+            BoundingBox(102, 122, 319, 249),
+        ],
+    )
+    span = detect_question_spans([layout], Path("paper_qp.pdf"), config)[0]
+
+    regions, flags = _detect_prompt_regions(span, [layout], config)
+
+    assert "duplicate_visual_regions_removed" in flags
+    assert sum(len(region.graphics) for region in regions) == 1
+    assert sum(region.duplicate_graphics_removed for region in regions) == 2

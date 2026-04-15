@@ -57,9 +57,9 @@ def _practice_record(record: dict[str, Any], output_dir: Path) -> dict[str, Any]
     if not paper_family or not topic or not question_number or not question_image or not markscheme_image:
         return None
 
-    question_src = _browser_path(question_image, output_dir)
-    markscheme_src = _browser_path(markscheme_image, output_dir)
-    if not question_src or not markscheme_src:
+    question_asset = _browser_asset(question_image, output_dir)
+    markscheme_asset = _browser_asset(markscheme_image, output_dir)
+    if not question_asset["src"] or not markscheme_asset["src"]:
         return None
 
     return {
@@ -67,26 +67,34 @@ def _practice_record(record: dict[str, Any], output_dir: Path) -> dict[str, Any]
         "topic": topic,
         "question_number": question_number,
         "marks_if_available": record.get("marks_if_available") or record.get("marks") or "",
-        "question_image": question_src,
-        "markscheme_image": markscheme_src,
+        "question_image": question_asset["src"],
+        "question_image_source_path": question_image,
+        "question_image_resolved_path": question_asset["resolved_path"],
+        "question_image_exists": question_asset["exists"],
+        "markscheme_image": markscheme_asset["src"],
+        "markscheme_image_source_path": markscheme_image,
+        "markscheme_image_resolved_path": markscheme_asset["resolved_path"],
+        "markscheme_image_exists": markscheme_asset["exists"],
     }
 
 
-def _browser_path(value: str, output_dir: Path) -> str:
+def _browser_asset(value: str, output_dir: Path) -> dict[str, Any]:
     if value.startswith(("http://", "https://", "data:")):
-        return value
+        return {"src": value, "resolved_path": value, "exists": True}
 
     path = Path(value).expanduser()
     if not path.is_absolute():
         path = Path.cwd() / path
-    if not path.exists():
-        return ""
 
     try:
         relative = path.resolve().relative_to(output_dir.resolve())
     except ValueError:
         relative = Path(_relative_path(path.resolve(), output_dir.resolve()))
-    return relative.as_posix()
+    return {
+        "src": relative.as_posix(),
+        "resolved_path": str(path.resolve()),
+        "exists": path.exists(),
+    }
 
 
 def _relative_path(path: Path, start: Path) -> str:
@@ -215,6 +223,13 @@ def _html_document(records: list[dict[str, Any]]) -> str:
       background: var(--surface);
     }}
 
+    .asset-debug {{
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }}
+
     .answer-controls {{
       margin: 16px 0;
     }}
@@ -276,6 +291,7 @@ def _html_document(records: list[dict[str, Any]]) -> str:
       </div>
 
       <img id="questionImage" class="exam-image" alt="Question screenshot">
+      <p id="questionImageDebug" class="asset-debug"></p>
 
       <div class="answer-controls">
         <button id="markschemeButton" type="button">Show mark scheme</button>
@@ -284,6 +300,7 @@ def _html_document(records: list[dict[str, Any]]) -> str:
       <section id="markschemeArea" class="markscheme" hidden>
         <h2>Mark scheme</h2>
         <img id="markschemeImage" class="exam-image" alt="Mark scheme screenshot">
+        <p id="markschemeImageDebug" class="asset-debug"></p>
       </section>
     </section>
   </main>
@@ -308,6 +325,8 @@ def _html_document(records: list[dict[str, Any]]) -> str:
     const marksMeta = document.querySelector("#marksMeta");
     const questionImage = document.querySelector("#questionImage");
     const markschemeImage = document.querySelector("#markschemeImage");
+    const questionImageDebug = document.querySelector("#questionImageDebug");
+    const markschemeImageDebug = document.querySelector("#markschemeImageDebug");
 
     function topicLabel(topic) {{
       return String(topic || "").replaceAll("_", " ");
@@ -384,10 +403,40 @@ def _html_document(records: list[dict[str, Any]]) -> str:
       marksMeta.textContent = record.marks_if_available ? `${{record.marks_if_available}} marks` : "Marks not shown";
       questionImage.src = record.question_image;
       markschemeImage.src = record.markscheme_image;
+      updateAssetDebug("question", record, questionImageDebug);
+      updateAssetDebug("markscheme", record, markschemeImageDebug);
       markschemeArea.hidden = true;
       markschemeButton.textContent = "Show mark scheme";
       questionArea.hidden = false;
       setStatus("");
+    }}
+
+    function updateAssetDebug(kind, record, target) {{
+      const src = record[`${{kind}}_image`] || "";
+      const sourcePath = record[`${{kind}}_image_source_path`] || src;
+      const resolvedPath = record[`${{kind}}_image_resolved_path`] || "";
+      const exists = record[`${{kind}}_image_exists`];
+      target.textContent = `image src: ${{src}} | source: ${{sourcePath}}${{resolvedPath ? ` | resolved: ${{resolvedPath}}` : ""}}`;
+      if (exists === false) {{
+        console.warn("Practice image missing at generation time", {{
+          record_id: `${{record.paper_family}}:${{record.topic}}:${{record.question_number}}`,
+          kind,
+          expected_image_path: sourcePath,
+          resolved_path: resolvedPath,
+          exists_at_generation: exists,
+        }});
+      }}
+    }}
+
+    function reportImageError(kind, record, image) {{
+      console.warn("Practice image failed to load", {{
+        record_id: record ? `${{record.paper_family}}:${{record.topic}}:${{record.question_number}}` : "",
+        kind,
+        image_src: image.getAttribute("src"),
+        expected_image_path: record ? record[`${{kind}}_image_source_path`] : "",
+        resolved_path: record ? record[`${{kind}}_image_resolved_path`] : "",
+        exists_at_generation: record ? record[`${{kind}}_image_exists`] : undefined,
+      }});
     }}
 
     paperSelect.addEventListener("change", () => {{
@@ -402,6 +451,9 @@ def _html_document(records: list[dict[str, Any]]) -> str:
     }});
 
     questionButton.addEventListener("click", showRandomQuestion);
+
+    questionImage.addEventListener("error", () => reportImageError("question", state.current, questionImage));
+    markschemeImage.addEventListener("error", () => reportImageError("markscheme", state.current, markschemeImage));
 
     markschemeButton.addEventListener("click", () => {{
       if (!state.current) return;

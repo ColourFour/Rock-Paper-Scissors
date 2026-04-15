@@ -140,7 +140,7 @@ detection:
   anchor_y_tolerance: 8
   span_line_y_tolerance: 6
   continuation_min_text_chars: 8
-  prompt_region_max_gap: 80
+  prompt_region_max_gap: 60
   prompt_graphic_lookahead: 180
   prompt_graphic_overlap_padding: 24
   min_crop_height: 24
@@ -165,8 +165,9 @@ classification:
   uncertainty_threshold: 0.55
 
 topic_pdfs:
-  enable_topic_pdfs: false
+  enable_topic_pdfs: true
   topic_pdf_output_dir: output/topic_pdfs
+  include_mark_scheme_link: true
   page_size: A4
   margin: 42
   image_max_width: 500

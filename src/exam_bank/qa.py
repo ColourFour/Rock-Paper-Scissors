@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from collections import Counter
 import csv
 from dataclasses import dataclass
 import json
 from pathlib import Path
 import re
 from typing import Any
+import warnings
+
+from .image_limits import SAFE_PROBE_PIXELS
 
 
 TARGET_PAPER_FAMILIES = ("P1", "P3", "P4", "P5")
@@ -101,8 +105,21 @@ FAIL_FLAGS = {
     "markscheme_header_not_ok",
     "markscheme_label_missing",
 }
+FLAG_PRIORITY = [
+    "record_incomplete",
+    "missing_source_pdf",
+    "empty_source_pdf",
+    "missing_question_number",
+    "missing_paper_family",
+    "invalid_paper_family",
+    "missing_topic",
+    "invalid_topic_for_paper",
+    "multiple_final_topics",
+    "missing_question_image",
+    "missing_markscheme_image",
+]
 
-LOW_CONFIDENCE_VALUES = {"", "low", "medium", "uncertain"}
+LOW_CONFIDENCE_VALUES = {"low", "uncertain"}
 
 
 @dataclass(frozen=True)
@@ -155,6 +172,11 @@ def run_qa(
         "only_failed": only_failed,
         "status_counts": all_status_counts,
         "written_status_counts": _status_counts(written_records),
+        "flag_counts": _flag_counts(qa_records),
+        "warning_flag_counts": _flag_counts([record for record in qa_records if record["qa_status"] == "warning"]),
+        "fail_flag_counts": _flag_counts([record for record in qa_records if record["qa_status"] == "fail"], only_flags=FAIL_FLAGS),
+        "top_warning_reason": _top_flag([record for record in qa_records if record["qa_status"] == "warning"]),
+        "top_fail_reason": _top_flag([record for record in qa_records if record["qa_status"] == "fail"], only_flags=FAIL_FLAGS),
     }
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -169,7 +191,7 @@ def run_qa(
     }
     json_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     _write_csv(written_records, csv_path)
-    _write_review_html(review_path)
+    _write_review_html(review_path, payload)
     return QAResult(
         records=written_records,
         skipped_records=skipped_records,
@@ -230,6 +252,8 @@ def validate_record(record: dict[str, Any], record_index: int, question_bank_pat
     _check_markscheme_header(record, flags, notes)
     _check_mapping_consistency(record, flags, notes)
     _check_existing_review_flags(review_flags, flags, notes)
+    question_resolved = _resolve_path(question_image, question_bank_path.parent) if question_image else None
+    markscheme_resolved = _resolve_path(markscheme_image, question_bank_path.parent) if markscheme_image else None
 
     status = _status_for_flags(flags)
     return {
@@ -241,6 +265,10 @@ def validate_record(record: dict[str, Any], record_index: int, question_bank_pat
         "topic": topic,
         "question_image": question_image,
         "markscheme_image": markscheme_image,
+        "question_image_exists": bool(question_resolved and question_resolved.exists()),
+        "question_image_resolved_path": str(question_resolved) if question_resolved else "",
+        "markscheme_image_exists": bool(markscheme_resolved and markscheme_resolved.exists()),
+        "markscheme_image_resolved_path": str(markscheme_resolved) if markscheme_resolved else "",
         "qa_status": status,
         "qa_flags": sorted(flags),
         "qa_notes": _dedupe(notes),
@@ -289,6 +317,12 @@ def _check_question_image(
     if "turn over" in question_text or "header_footer_contamination" in _list_text(record.get("review_flags")):
         _add(flags, "possible_footer_in_question_crop")
         notes.append("question text metadata contains likely footer/header text")
+    if "additional page" in question_text or "excluded_boilerplate_additional_page" in _list_text(record.get("review_flags")):
+        _add(flags, "possible_additional_page_in_question_crop")
+        notes.append("question crop metadata contains an Additional Page boundary")
+    if "© ucles" in question_text or "copyright_footer" in " ".join(_list_text(record.get("review_flags"))).lower():
+        _add(flags, "possible_copyright_in_question_crop")
+        notes.append("question crop metadata contains likely copyright/footer text")
 
 
 def _check_markscheme_image(
@@ -315,9 +349,12 @@ def _check_markscheme_image(
 def _check_markscheme_header(record: dict[str, Any], flags: list[str], notes: list[str]) -> None:
     header = _normalize_header(record.get("markscheme_table_header_detected"))
     table_detected = bool(record.get("markscheme_table_detected"))
+    table_header_ok = bool(record.get("markscheme_table_header_ok"))
     markscheme_text = _text(record.get("markscheme_text") or record.get("answer_text"))
     review_flags = set(_list_text(record.get("review_flags")))
 
+    if table_header_ok:
+        return
     if header:
         if tuple(header) != EXPECTED_MARKSCHEME_HEADER:
             _add(flags, "markscheme_header_not_found")
@@ -326,7 +363,7 @@ def _check_markscheme_header(record: dict[str, Any], flags: list[str], notes: li
         return
 
     text_has_expected_header = _text_has_expected_markscheme_header(markscheme_text)
-    if not text_has_expected_header:
+    if not table_detected and not text_has_expected_header:
         _add(flags, "markscheme_header_not_found")
         notes.append("expected mark scheme table header was not found in metadata")
 
@@ -349,7 +386,7 @@ def _check_mapping_consistency(record: dict[str, Any], flags: list[str], notes: 
     if any(int(page) < 6 for page in _list_int(record.get("markscheme_pages"))):
         _add(flags, "markscheme_page_before_6")
         notes.append("mark scheme crop came from a page before page 6")
-    if record.get("markscheme_image") and not bool(record.get("markscheme_table_header_ok", record.get("markscheme_table_detected"))):
+    if record.get("markscheme_image") and record.get("markscheme_table_header_ok") is False and not bool(record.get("markscheme_table_detected")):
         _add(flags, "markscheme_header_not_ok")
         notes.append("mark scheme crop is not linked to the expected answer-table header")
     if record.get("markscheme_image") and not markscheme_question_number:
@@ -380,6 +417,20 @@ def _check_existing_review_flags(review_flags: list[str], flags: list[str], note
         _add(flags, "question_crop_suspicious")
     if {"header_footer_contamination"} & review_flag_set:
         _add(flags, "possible_footer_in_question_crop")
+    if {"excluded_boilerplate_additional_page"} & review_flag_set:
+        _add(flags, "possible_additional_page_in_question_crop")
+    if {"excluded_boilerplate_copyright_footer", "excluded_boilerplate_publisher_footer", "excluded_boilerplate_paper_code_footer"} & review_flag_set:
+        _add(flags, "possible_copyright_in_question_crop")
+        _add(flags, "possible_footer_in_question_crop")
+    if {"duplicate_visual_regions_removed"} & review_flag_set:
+        _add(flags, "duplicate_visual_regions_detected")
+        notes.append("duplicate visual regions were removed during crop rendering")
+    if {"answer_line_space_excluded"} & review_flag_set:
+        _add(flags, "possible_answer_line_space_in_question_crop")
+        notes.append("lined answer-space region was detected and excluded")
+    if {"impossible_question_number_anchor_excluded"} & review_flag_set:
+        _add(flags, "question_crop_suspicious")
+        notes.append("an impossible question-number anchor was excluded from the crop span")
     if {"markscheme_image_uncertain", "markscheme_table_continuation_inferred"} & review_flag_set:
         _add(flags, "markscheme_crop_low_confidence")
     if {"markscheme_image_no_boundaries", "markscheme_no_row_for_question"} & review_flag_set:
@@ -395,20 +446,24 @@ def _probe_image(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {"exists": False, "path": str(path)}
     try:
-        from PIL import Image, ImageStat
+        from PIL import Image as PILImage
+        from PIL import ImageStat
+        from PIL.Image import DecompressionBombWarning
     except ImportError:
         return {"exists": True, "readable": False, "path": str(path), "error": "Pillow is not installed"}
-
     try:
-        with Image.open(path) as image:
-            width, height = image.size
-            sample = image.convert("RGB")
-            sample.thumbnail((1000, 1000))
-            gray = sample.convert("L")
-            histogram = gray.histogram()
-            total = sum(histogram) or 1
-            nonwhite = sum(count for value, count in enumerate(histogram) if value < 245)
-            stat = ImageStat.Stat(gray)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", DecompressionBombWarning)
+            with PILImage.open(path) as image:
+                width, height = image.size
+                sample = image.convert("RGB")
+                sample.thumbnail((1000, 1000))
+                gray = sample.convert("L")
+                histogram = gray.histogram()
+                total = sum(histogram) or 1
+                nonwhite = sum(count for value, count in enumerate(histogram) if value < 245)
+                stat = ImageStat.Stat(gray)
+            bomb_warnings = [warning for warning in caught if issubclass(warning.category, DecompressionBombWarning)]
             return {
                 "exists": True,
                 "readable": True,
@@ -418,6 +473,7 @@ def _probe_image(path: Path) -> dict[str, Any]:
                 "pixels": width * height,
                 "nonwhite_ratio": nonwhite / total,
                 "stddev": float(stat.stddev[0]),
+                "decompression_bomb_warning": bool(bomb_warnings) or (width * height > SAFE_PROBE_PIXELS),
             }
     except Exception as exc:
         return {"exists": True, "readable": False, "path": str(path), "error": exc.__class__.__name__}
@@ -441,6 +497,8 @@ def _apply_image_metrics(kind: str, metrics: dict[str, Any], flags: list[str], n
     nonwhite_ratio = float(metrics["nonwhite_ratio"])
     stddev = float(metrics["stddev"])
     notes.append(f"{display} image {width}x{height}, nonwhite={nonwhite_ratio:.4f}, stddev={stddev:.2f}")
+    if metrics.get("decompression_bomb_warning"):
+        notes.append(f"{display} image is very large; opened deliberately for QA probing")
 
     if width < 120 or height < 60 or pixels < 10000:
         _add(flags, f"{prefix}_crop_too_small")
@@ -466,12 +524,13 @@ def _write_csv(records: list[dict[str, Any]], output_path: Path) -> None:
             writer.writerow({field: _csv_value(record.get(field)) for field in CSV_FIELDS})
 
 
-def _write_review_html(output_path: Path) -> None:
-    output_path.write_text(_review_html(), encoding="utf-8")
+def _write_review_html(output_path: Path, payload: dict[str, Any]) -> None:
+    output_path.write_text(_review_html(payload), encoding="utf-8")
 
 
-def _review_html() -> str:
-    return """<!doctype html>
+def _review_html(payload: dict[str, Any]) -> str:
+    embedded_payload = json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
+    html = """<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -649,6 +708,13 @@ def _review_html() -> str:
       overflow-wrap: anywhere;
     }
 
+    .asset-debug {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
     .empty {
       padding: 34px 0;
       color: var(--muted);
@@ -673,7 +739,7 @@ def _review_html() -> str:
 <body>
   <header>
     <h1>QA Review</h1>
-    <p class="summary" id="summary">Loading qa_report.json.</p>
+    <p class="summary" id="summary">Loading QA report.</p>
   </header>
   <main>
     <section class="controls" aria-label="Filters">
@@ -696,6 +762,7 @@ def _review_html() -> str:
     </section>
     <section id="records" aria-live="polite"></section>
   </main>
+  <script id="qaPayload" type="application/json">__QA_PAYLOAD__</script>
   <script>
     const state = { records: [], summary: {} };
     const statusFilter = document.querySelector("#statusFilter");
@@ -766,17 +833,41 @@ def _review_html() -> str:
           <div class="images">
             <figure>
               <figcaption>Question</figcaption>
-              ${record.question_image ? `<img loading="lazy" src="${escapeAttribute(imagePath(record.question_image))}" alt="Question ${escapeAttribute(record.question_number || "")}">` : '<p class="empty">Missing question image.</p>'}
+              ${record.question_image ? `<img loading="lazy" data-kind="question" src="${escapeAttribute(imagePath(record.question_image))}" alt="Question ${escapeAttribute(record.question_number || "")}">` : '<p class="empty">Missing question image.</p>'}
+              ${assetDebug(record, "question")}
             </figure>
             <figure>
               <figcaption>Mark Scheme</figcaption>
-              ${record.markscheme_image ? `<img loading="lazy" src="${escapeAttribute(imagePath(record.markscheme_image))}" alt="Mark scheme ${escapeAttribute(record.question_number || "")}">` : '<p class="empty">Missing mark scheme image.</p>'}
+              ${record.markscheme_image ? `<img loading="lazy" data-kind="markscheme" src="${escapeAttribute(imagePath(record.markscheme_image))}" alt="Mark scheme ${escapeAttribute(record.question_number || "")}">` : '<p class="empty">Missing mark scheme image.</p>'}
+              ${assetDebug(record, "markscheme")}
             </figure>
           </div>
           ${notes ? `<p class="notes">${notes}</p>` : ""}
         `;
         records.appendChild(article);
       }
+      article.querySelectorAll("img").forEach((image) => {
+        image.addEventListener("error", () => {
+          const kind = image.dataset.kind || "image";
+          console.warn("QA image failed to load", {
+            record_id: `${record.paper_family || "unknown"}:${record.topic || "unknown"}:${record.question_number || "missing"}`,
+            kind,
+            image_src: image.getAttribute("src"),
+            expected_image_path: kind === "question" ? record.question_image : record.markscheme_image,
+            resolved_path: kind === "question" ? record.question_image_resolved_path : record.markscheme_image_resolved_path,
+            exists_at_generation: kind === "question" ? record.question_image_exists : record.markscheme_image_exists,
+          });
+        });
+      });
+    }
+
+    function assetDebug(record, kind) {
+      const key = kind === "question" ? "question_image" : "markscheme_image";
+      const resolvedKey = kind === "question" ? "question_image_resolved_path" : "markscheme_image_resolved_path";
+      const existsKey = kind === "question" ? "question_image_exists" : "markscheme_image_exists";
+      const value = record[key] || "";
+      if (!value) return "";
+      return `<p class="asset-debug">image src: ${escapeHtml(imagePath(value))} | source: ${escapeHtml(value)} | resolved: ${escapeHtml(record[resolvedKey] || "")} | exists at generation: ${escapeHtml(record[existsKey])}</p>`;
     }
 
     function escapeHtml(value) {
@@ -794,6 +885,11 @@ def _review_html() -> str:
     }
 
     async function loadDefaultReport() {
+      const embedded = document.querySelector("#qaPayload");
+      if (embedded && embedded.textContent.trim()) {
+        setReport(JSON.parse(embedded.textContent));
+        return;
+      }
       try {
         const response = await fetch("qa_report.json", { cache: "no-store" });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -816,6 +912,7 @@ def _review_html() -> str:
 </body>
 </html>
 """
+    return html.replace("__QA_PAYLOAD__", embedded_payload)
 
 
 def _status_for_flags(flags: list[str]) -> str:
@@ -833,6 +930,22 @@ def _status_counts(records: list[dict[str, Any]]) -> dict[str, int]:
         if status in counts:
             counts[status] += 1
     return counts
+
+
+def _flag_counts(records: list[dict[str, Any]], only_flags: set[str] | None = None) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for record in records:
+        counts.update(str(flag) for flag in record.get("qa_flags", []) if only_flags is None or str(flag) in only_flags)
+    priority = {flag: index for index, flag in enumerate(FLAG_PRIORITY)}
+    return dict(sorted(counts.items(), key=lambda item: (-item[1], priority.get(item[0], len(priority)), item[0])))
+
+
+def _top_flag(records: list[dict[str, Any]], only_flags: set[str] | None = None) -> dict[str, Any] | None:
+    counts = _flag_counts(records, only_flags=only_flags)
+    if not counts:
+        return None
+    flag, count = next(iter(counts.items()))
+    return {"flag": flag, "count": count}
 
 
 def _resolve_path(value: str, base_dir: Path) -> Path:

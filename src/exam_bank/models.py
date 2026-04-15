@@ -109,7 +109,7 @@ class ClassificationResult:
     review_flags: list[str] = field(default_factory=list)
     topic_confidence: str = "low"
     topic_evidence: str = ""
-    topic_evidence_details: dict[str, str] = field(default_factory=dict)
+    topic_evidence_details: dict[str, Any] = field(default_factory=dict)
     secondary_topics: list[str] = field(default_factory=list)
     topic_uncertain: bool = False
     alternative_topics: list[str] = field(default_factory=list)
@@ -122,6 +122,7 @@ class RenderResult:
     crop_uncertain: bool = False
     debug_paths: list[str] = field(default_factory=list)
     extracted_text: str = ""
+    crop_diagnostics: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -163,8 +164,10 @@ class QuestionRecord:
     crop_uncertain: bool = False
     question_crop_confidence: str = ""
     crop_debug_paths: list[str] = field(default_factory=list)
+    question_crop_diagnostics: dict[str, Any] = field(default_factory=dict)
     topic_alternatives: list[str] = field(default_factory=list)
-    topic_evidence_details: dict[str, str] = field(default_factory=dict)
+    topic_evidence_details: dict[str, Any] = field(default_factory=dict)
+    examiner_report_evidence: dict[str, Any] = field(default_factory=dict)
     question_level_paper_family: str = ""
     question_level_topic: str = ""
     question_level_subtopic: str = ""
@@ -220,6 +223,7 @@ class QuestionRecord:
             "topic_confidence_score": _confidence_score(self.topic_confidence),
             "topic_evidence": self.topic_evidence,
             "topic_evidence_details": self.topic_evidence_details,
+            "examiner_report_evidence": self.examiner_report_evidence,
             "secondary_topics": self.secondary_topics,
             "topic_uncertain": self.topic_uncertain,
             "difficulty": self.difficulty,
@@ -233,6 +237,7 @@ class QuestionRecord:
             "confidence": round(self.confidence, 3),
             "crop_uncertain": self.crop_uncertain,
             "crop_debug_paths": self.crop_debug_paths,
+            "question_crop_diagnostics": self.question_crop_diagnostics,
             "topic_alternatives": self.topic_alternatives,
             "markscheme_text": self.answer_text,
             "markscheme_image": self.markscheme_image,

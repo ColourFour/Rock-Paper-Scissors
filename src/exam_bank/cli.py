@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import platform
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 from .config import AppConfig, load_config
-from .pipeline import process_batch, process_sample
+from .pipeline import process_batch, process_folder, process_sample
 from .practice_page import build_practice_page
 from .qa import run_qa
-from .topic_pdfs import build_topic_pdfs_from_json, build_topic_pdfs_from_records
+from .topic_pdfs import TopicPDFResult, build_topic_pdfs_from_json, build_topic_pdfs_from_records
 
 
 DEPENDENCIES = {
@@ -25,7 +27,15 @@ DEPENDENCIES = {
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Build a grouped exam question bank from PDF papers.")
+    parser = argparse.ArgumentParser(
+        description="Build a grouped exam question bank from PDF papers.",
+        epilog=(
+            "Open generated HTML/CSV files with `open path/to/file` on macOS, "
+            "or use `open-qa` / `open-review`. Do not type output paths directly "
+            "as shell commands. If you serve files manually and port 8000 is busy, "
+            "use another port such as `python3 -m http.server 8001`."
+        ),
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     preflight = subparsers.add_parser("preflight", help="Check dependencies, folders, and config.")
@@ -43,6 +53,12 @@ def main(argv: list[str] | None = None) -> int:
     process.add_argument("--build-topic-pdfs", action="store_true", help="Also build topic-based PDF packs after processing.")
     process.set_defaults(func=cmd_process)
 
+    process_folder_parser = subparsers.add_parser("process-folder", help="Process a folder of QP/MS/ER PDFs using filename-first routing.")
+    process_folder_parser.add_argument("--config", default="config.yaml", help="Path to config.yaml.")
+    process_folder_parser.add_argument("--input-folder", required=True, help="Folder containing question papers, mark schemes, and examiner reports.")
+    process_folder_parser.add_argument("--build-topic-pdfs", action="store_true", help="Also build topic-based PDF packs after processing.")
+    process_folder_parser.set_defaults(func=cmd_process_folder)
+
     topic_pdfs = subparsers.add_parser("topic-pdfs", help="Build topic-based PDF packs from an existing question bank JSON.")
     topic_pdfs.add_argument("--config", default="config.yaml", help="Path to config.yaml.")
     topic_pdfs.add_argument("--question-bank", help="Path to a question_bank.json file. Defaults to output/json/question_bank.json.")
@@ -59,6 +75,14 @@ def main(argv: list[str] | None = None) -> int:
     practice_page.add_argument("--question-bank", help="Path to a question_bank.json file. Defaults to output/json/question_bank.json.")
     practice_page.add_argument("--output-dir", help="Output directory. Defaults to output/practice.")
     practice_page.set_defaults(func=cmd_practice_page)
+
+    open_qa = subparsers.add_parser("open-qa", help="Open output/qa/review.html. No local server is needed for the generated QA page.")
+    open_qa.add_argument("--config", default="config.yaml", help="Path to config.yaml.")
+    open_qa.set_defaults(func=cmd_open_qa)
+
+    open_review = subparsers.add_parser("open-review", help="Open the main review output CSV.")
+    open_review.add_argument("--config", default="config.yaml", help="Path to config.yaml.")
+    open_review.set_defaults(func=cmd_open_review)
 
     args = parser.parse_args(argv)
     return args.func(args)
@@ -118,7 +142,17 @@ def cmd_process(args: argparse.Namespace) -> int:
     _print_result(result.records, result.json_path, result.csv_path, result.review_path)
     if args.build_topic_pdfs or config.topic_pdfs.enable_topic_pdfs:
         topic_result = build_topic_pdfs_from_records(result.records, config)
-        _print_topic_pdf_result(topic_result.pdf_paths, topic_result.skipped_count, topic_result.review_path)
+        _print_topic_pdf_result(topic_result)
+    return 0
+
+
+def cmd_process_folder(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    result = process_folder(args.input_folder, config)
+    _print_result(result.records, result.json_path, result.csv_path, result.review_path)
+    if args.build_topic_pdfs or config.topic_pdfs.enable_topic_pdfs:
+        topic_result = build_topic_pdfs_from_records(result.records, config)
+        _print_topic_pdf_result(topic_result)
     return 0
 
 
@@ -134,7 +168,7 @@ def cmd_topic_pdfs(args: argparse.Namespace) -> int:
         )
         return 1
     topic_result = build_topic_pdfs_from_json(question_bank, config)
-    _print_topic_pdf_result(topic_result.pdf_paths, topic_result.skipped_count, topic_result.review_path)
+    _print_topic_pdf_result(topic_result)
     return 0
 
 
@@ -172,7 +206,18 @@ def cmd_practice_page(args: argparse.Namespace) -> int:
     if result.skipped_records:
         print(f"Practice skipped records: {result.skipped_records}")
     print(f"Practice page: {result.html_path}")
+    print("Open it directly with `open output/practice/index.html`; no local server is needed.")
     return 0
+
+
+def cmd_open_qa(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    return _open_path(config.output.json_dir.parent / "qa" / "review.html", "QA review")
+
+
+def cmd_open_review(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    return _open_path(config.output.review_dir / config.naming.review_name, "main review")
 
 
 def _print_result(records: list[object], json_path: Path, csv_path: Path, review_path: Path) -> None:
@@ -182,12 +227,19 @@ def _print_result(records: list[object], json_path: Path, csv_path: Path, review
     print(f"Review: {review_path}")
 
 
-def _print_topic_pdf_result(pdf_paths: list[Path], skipped_count: int, review_path: Path | None) -> None:
+def _print_topic_pdf_result(result: TopicPDFResult) -> None:
+    pdf_paths = result.pdf_paths
     print(f"Topic PDFs: {len(pdf_paths)}")
     for path in pdf_paths:
         print(f"  {path}")
+    print(f"Topic PDF mark scheme links added: {result.mark_scheme_link_count}")
+    missing_links = result.missing_mark_scheme_link_count
+    if missing_links:
+        print(f"Topic PDF records missing mark scheme image path: {missing_links}")
+    skipped_count = result.skipped_count
     if skipped_count:
         print(f"Topic PDF skipped records: {skipped_count}")
+    review_path = result.review_path
     if review_path:
         print(f"Topic PDF review items: {review_path}")
 
@@ -207,6 +259,31 @@ def _print_qa_result(summary: dict[str, object], json_path: Path, csv_path: Path
     print(f"QA JSON: {json_path}")
     print(f"QA CSV: {csv_path}")
     print(f"QA review: {review_path}")
+    top_warning = summary.get("top_warning_reason")
+    top_fail = summary.get("top_fail_reason")
+    if isinstance(top_warning, dict) and top_warning:
+        print(f"Top QA warning: {top_warning.get('flag')} ({top_warning.get('count')})")
+    if isinstance(top_fail, dict) and top_fail:
+        print(f"Top QA fail: {top_fail.get('flag')} ({top_fail.get('count')})")
+    print(f"Open QA review: python -m exam_bank.cli open-qa --config config.yaml")
+
+
+def _open_path(path: Path, label: str) -> int:
+    if not path.exists():
+        print(
+            f"{label.capitalize()} file not found: {path}\n"
+            "Run the matching generation command first.",
+            file=sys.stderr,
+        )
+        return 1
+    if platform.system() == "Darwin":
+        subprocess.run(["open", str(path)], check=False)
+    else:
+        import webbrowser
+
+        webbrowser.open(path.resolve().as_uri())
+    print(f"Opened {label}: {path}")
+    return 0
 
 
 if __name__ == "__main__":

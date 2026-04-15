@@ -14,6 +14,22 @@ QUESTION_START_RE = re.compile(
 )
 SUBPART_RE = re.compile(r"^\s*(?:\d+\s*)?(?P<label>\([a-z]\)(?:\([ivxlcdm]+\))*)", re.IGNORECASE)
 MARK_RE = re.compile(r"\[(?P<marks>\d{1,2})\]")
+BOILERPLATE_PATTERNS = [
+    (r"^Additional Page\b", "additional_page"),
+    (r"If you use the following lined page", "lined_page_instruction"),
+    (r"write the question number", "lined_page_instruction"),
+    (r"^©\s*UCLES\b", "copyright_footer"),
+    (r"^UCLES\b", "copyright_footer"),
+    (r"^9709[/_ -]", "paper_code_footer"),
+    (r"^\d{4}/\d{2}/[A-Z]/[A-Z]/\d{2}$", "paper_code_footer"),
+    (r"^Cambridge International", "publisher_footer"),
+    (r"DO NOT WRITE IN THIS MARGIN", "margin_furniture"),
+    (r"^This document consists of", "page_furniture"),
+    (r"^BLANK PAGE$", "blank_page"),
+    (r"^Question Paper$", "page_furniture"),
+    (r"^Mark Scheme$", "page_furniture"),
+    (r"^Turn over$", "footer"),
+]
 
 
 def parse_question_start(text: str, config: AppConfig) -> tuple[str, str] | None:
@@ -30,7 +46,8 @@ def parse_question_start(text: str, config: AppConfig) -> tuple[str, str] | None
 
 
 def detect_question_spans(layouts: list[PageLayout], source_pdf: str | Path, config: AppConfig) -> list[QuestionSpan]:
-    starts = detect_question_starts(layouts, config)
+    max_question_number = _max_question_number_for_source(source_pdf, config)
+    starts = detect_question_starts(layouts, config, source_pdf=source_pdf)
     paper_name = _safe_paper_name(Path(source_pdf).stem)
 
     if not starts:
@@ -47,8 +64,9 @@ def detect_question_spans(layouts: list[PageLayout], source_pdf: str | Path, con
             end_y = next_start.y0
 
         page_numbers = list(range(start.page_number, end_page + 1))
-        blocks = _blocks_within_span(layouts, start.page_number, start.y0, end_page, end_y, config)
+        blocks, boundary_flags = _blocks_within_span(layouts, start.page_number, start.y0, end_page, end_y, config, max_question_number)
         flags = _span_flags(blocks, layouts, page_numbers, config, start)
+        flags.extend(boundary_flags)
         if next_start and int(next_start.question_number) > int(start.question_number) + 1:
             flags.append("question_sequence_gap")
         flags.extend(_validate_span_blocks(start, blocks, layouts, config))
@@ -74,12 +92,17 @@ def detect_question_spans(layouts: list[PageLayout], source_pdf: str | Path, con
     return spans
 
 
-def detect_question_starts(layouts: list[PageLayout], config: AppConfig) -> list[QuestionStart]:
+def detect_question_starts(layouts: list[PageLayout], config: AppConfig, source_pdf: str | Path | None = None) -> list[QuestionStart]:
+    max_question_number = _max_question_number_for_source(source_pdf, config)
     raw_starts = [
         candidate
         for candidate in detect_question_anchor_candidates(layouts, config)
         if candidate.confidence >= config.detection.anchor_min_confidence
+        and int(candidate.question_number) <= max_question_number
     ]
+    first_question_one_index = next((index for index, candidate in enumerate(raw_starts) if candidate.question_number == "1"), None)
+    if first_question_one_index is not None:
+        raw_starts = raw_starts[first_question_one_index:]
 
     starts: list[QuestionStart] = []
     seen_numbers: set[str] = set()
@@ -110,6 +133,8 @@ def detect_question_anchor_candidates(layouts: list[PageLayout], config: AppConf
     candidates: list[QuestionStart] = []
     global_index = 0
     for page in layouts:
+        if _is_cover_instruction_page(page):
+            continue
         sorted_blocks = sorted(page.blocks, key=lambda item: (item.bbox.y0, item.bbox.x0))
         font_median = _median_font_size(sorted_blocks)
         previous_block: TextBlock | None = None
@@ -180,19 +205,28 @@ def _blocks_within_span(
     end_page: int,
     end_y: float,
     config: AppConfig,
-) -> list[TextBlock]:
+    max_question_number: int | None = None,
+) -> tuple[list[TextBlock], list[str]]:
     selected: list[TextBlock] = []
+    flags: list[str] = []
     for page in layouts:
         if page.page_number < start_page or page.page_number > end_page:
             continue
         top = start_y if page.page_number == start_page else config.detection.crop_top_margin
         bottom = end_y if page.page_number == end_page else page.height - config.detection.crop_bottom_margin
+        effective_bottom, boundary_flags = _effective_question_bottom(page, top, bottom, config)
+        bottom = effective_bottom
+        flags.extend(boundary_flags)
         answer_rule_bands = _answer_rule_y_bands(page)
         for block in page.blocks:
             if block.bbox.y1 >= top and block.bbox.y0 < bottom:
+                parsed = parse_question_start(block.first_line, config)
+                if parsed and max_question_number is not None and int(parsed[0]) > max_question_number:
+                    flags.append("impossible_question_number_anchor_excluded")
+                    continue
                 if _is_question_content_block(block, page, config, answer_rule_bands=answer_rule_bands):
                     selected.append(block)
-    return sorted(selected, key=lambda block: (block.page_number, block.bbox.y0, block.bbox.x0))
+    return sorted(selected, key=lambda block: (block.page_number, block.bbox.y0, block.bbox.x0)), sorted(set(flags))
 
 
 def _span_flags(
@@ -308,6 +342,26 @@ def _safe_paper_name(stem: str) -> str:
     return cleaned or "paper"
 
 
+def _max_question_number_for_source(source_pdf: str | Path | None, config: AppConfig) -> int:
+    if source_pdf is None:
+        return config.detection.max_question_number
+    stem = Path(source_pdf).stem
+    matches = re.findall(r"(?<!\d)([1-6][1-9])(?!\d)", stem)
+    if not matches:
+        return config.detection.max_question_number
+    component = matches[-1]
+    paper_digit = component[0]
+    paper_maxima = {
+        "1": 14,
+        "2": 8,
+        "3": 12,
+        "4": 8,
+        "5": 8,
+        "6": 8,
+    }
+    return min(config.detection.max_question_number, paper_maxima.get(paper_digit, config.detection.max_question_number))
+
+
 def _anchor_block_can_be_question_start(block: TextBlock, page: PageLayout, config: AppConfig) -> bool:
     if not _is_question_content_block(block, page, config):
         return False
@@ -317,6 +371,17 @@ def _anchor_block_can_be_question_start(block: TextBlock, page: PageLayout, conf
     if block.bbox.x0 > config.detection.question_start_max_x + config.detection.anchor_left_tolerance:
         return False
     return True
+
+
+def _is_cover_instruction_page(page: PageLayout) -> bool:
+    text = "\n".join(_clean_text_line(block.text) for block in page.blocks)
+    lowered = text.lower()
+    return (
+        "instructions" in lowered
+        and "information" in lowered
+        and ("you will need" in lowered or "answer all questions" in lowered)
+        and not re.search(r"^\s*1\s+\S", text, re.MULTILINE)
+    )
 
 
 def _score_anchor(
@@ -415,20 +480,15 @@ def _is_footer_or_header_block(block: TextBlock, page: PageLayout, config: AppCo
 
 
 def _is_boilerplate_text(text: str) -> bool:
+    return _boilerplate_reason(text) is not None
+
+
+def _boilerplate_reason(text: str) -> str | None:
     text = _clean_text_line(text)
-    boilerplate_patterns = [
-        r"^©\s*UCLES\b",
-        r"^UCLES\b",
-        r"^9709[/_ -]",
-        r"^\d{4}/\d{2}/[A-Z]/[A-Z]/\d{2}$",
-        r"^Cambridge International",
-        r"^This document consists of",
-        r"^BLANK PAGE$",
-        r"^Question Paper$",
-        r"^Mark Scheme$",
-        r"^Turn over$",
-    ]
-    return any(re.search(pattern, text, re.IGNORECASE) for pattern in boilerplate_patterns)
+    for pattern, reason in BOILERPLATE_PATTERNS:
+        if re.search(pattern, text, re.IGNORECASE):
+            return reason
+    return None
 
 
 def _is_answer_space_text(text: str) -> bool:
@@ -485,6 +545,64 @@ def _answer_rule_y_bands(layout: PageLayout) -> list[float]:
         if total_width >= layout.width * 0.25 or len(boxes) >= 5:
             bands.append(y_key * 2)
     return bands
+
+
+def _effective_question_bottom(
+    layout: PageLayout,
+    top: float,
+    bottom: float,
+    config: AppConfig,
+) -> tuple[float, list[str]]:
+    candidates: list[tuple[float, str]] = []
+    for block in sorted(layout.blocks, key=lambda item: item.bbox.y0):
+        if block.bbox.y0 <= top + 2 or block.bbox.y0 >= bottom:
+            continue
+        reason = _boilerplate_reason(block.text)
+        if reason:
+            candidates.append((block.bbox.y0, f"excluded_boilerplate_{reason}"))
+
+    answer_start = _lined_answer_region_start(layout, top, bottom, config)
+    if answer_start is not None:
+        candidates.append((answer_start, "answer_line_space_excluded"))
+
+    if not candidates:
+        return bottom, []
+    y, reason = min(candidates, key=lambda item: item[0])
+    return max(top + config.detection.min_crop_height, min(bottom, y - config.detection.crop_padding)), [reason]
+
+
+def _lined_answer_region_start(
+    layout: PageLayout,
+    top: float,
+    bottom: float,
+    config: AppConfig,
+) -> float | None:
+    bands = [band for band in sorted(_answer_rule_y_bands(layout)) if top + 35 <= band < bottom]
+    if len(bands) < 4:
+        return None
+
+    runs: list[list[float]] = []
+    current: list[float] = [bands[0]]
+    for band in bands[1:]:
+        if band - current[-1] <= 34:
+            current.append(band)
+        else:
+            runs.append(current)
+            current = [band]
+    runs.append(current)
+
+    for run in runs:
+        if len(run) >= 4 and run[-1] - run[0] >= 60:
+            text_after = [
+                block
+                for block in layout.blocks
+                if run[0] <= block.bbox.y0 <= min(bottom, run[-1] + 45)
+                and not _is_answer_space_text(block.text)
+                and not _is_boilerplate_text(block.text)
+            ]
+            if len(text_after) <= 1:
+                return run[0]
+    return None
 
 
 def _is_answer_rule_like(box: BoundingBox, layout: PageLayout) -> bool:

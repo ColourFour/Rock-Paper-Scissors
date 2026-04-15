@@ -894,7 +894,7 @@ class DetectionConfig:
     anchor_y_tolerance: float = 8
     span_line_y_tolerance: float = 6
     continuation_min_text_chars: int = 8
-    prompt_region_max_gap: float = 80
+    prompt_region_max_gap: float = 60
     prompt_graphic_lookahead: float = 180
     prompt_graphic_overlap_padding: float = 24
     min_crop_height: float = 24
@@ -929,6 +929,7 @@ class ClassificationConfig:
 class TopicPDFConfig:
     enable_topic_pdfs: bool = False
     topic_pdf_output_dir: Path = Path("output/topic_pdfs")
+    include_mark_scheme_link: bool = True
     page_size: str = "A4"
     margin: float = 42
     image_max_width: float = 500

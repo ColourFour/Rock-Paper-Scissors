@@ -1,19 +1,32 @@
 from pathlib import Path
 
-from exam_bank.topic_pdfs import DIFFICULTY_SECTIONS, _group_by_topic, _sorted_questions, _valid_questions
+import pytest
+
+from exam_bank.config import AppConfig
+from exam_bank.topic_pdfs import (
+    DIFFICULTY_SECTIONS,
+    _group_by_topic,
+    _mark_scheme_link_target,
+    _sorted_questions,
+    _valid_questions,
+    build_topic_pdfs,
+)
 
 
 def test_topic_pdf_validation_groups_and_sorts_records(tmp_path: Path) -> None:
     image_a = tmp_path / "a.png"
     image_b = tmp_path / "b.png"
+    markscheme_a = tmp_path / "ms_a.png"
     image_a.write_bytes(b"not checked here")
     image_b.write_bytes(b"not checked here")
+    markscheme_a.write_bytes(b"not checked here")
     records = [
         {
             "topic": "calculus",
             "subtopic": "integration",
             "difficulty": "average",
             "screenshot_path": str(image_b),
+            "markscheme_image": str(markscheme_a),
             "paper_name": "paper_b",
             "question_number": "10",
             "marks_if_available": 6,
@@ -37,6 +50,8 @@ def test_topic_pdf_validation_groups_and_sorts_records(tmp_path: Path) -> None:
     assert DIFFICULTY_SECTIONS["average"] == "Medium"
     assert list(grouped) == ["calculus"]
     assert [question.question_number for question in sorted_questions] == ["2", "10"]
+    assert sorted_questions[1].markscheme_image_path == markscheme_a
+    assert _mark_scheme_link_target(sorted_questions[1], tmp_path / "topic_pdfs") == "../ms_a.png"
 
 
 def test_topic_pdf_validation_flags_missing_metadata() -> None:
@@ -54,3 +69,43 @@ def test_topic_pdf_validation_flags_missing_metadata() -> None:
         "topic_pdf_missing_difficulty",
         "topic_pdf_missing_image",
     ]
+
+
+def test_topic_pdf_build_counts_mark_scheme_links(tmp_path: Path) -> None:
+    pil_image = pytest.importorskip("PIL.Image")
+    pytest.importorskip("reportlab")
+
+    question_a = tmp_path / "q_a.png"
+    question_b = tmp_path / "q_b.png"
+    markscheme_a = tmp_path / "markscheme_a.png"
+    for path in [question_a, question_b, markscheme_a]:
+        image = pil_image.new("RGB", (200, 80), "white")
+        image.save(path)
+
+    config = AppConfig()
+    config.topic_pdfs.topic_pdf_output_dir = tmp_path / "topic_pdfs"
+    config.topic_pdfs.include_mark_scheme_link = True
+    records = [
+        {
+            "topic": "calculus",
+            "difficulty": "easy",
+            "question_image": str(question_a),
+            "markscheme_image": str(markscheme_a),
+            "paper_name": "paper_a",
+            "question_number": "1",
+        },
+        {
+            "topic": "calculus",
+            "difficulty": "easy",
+            "question_image": str(question_b),
+            "paper_name": "paper_a",
+            "question_number": "2",
+        },
+    ]
+
+    result = build_topic_pdfs(records, config)
+
+    assert len(result.pdf_paths) == 1
+    assert result.pdf_paths[0].exists()
+    assert result.mark_scheme_link_count == 1
+    assert result.missing_mark_scheme_link_count == 1

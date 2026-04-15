@@ -47,7 +47,7 @@ def test_practice_page_embeds_data_and_uses_relative_image_paths(tmp_path: Path,
     assert "Show mark scheme" in html
 
 
-def test_practice_page_skips_records_without_both_images(tmp_path: Path, monkeypatch) -> None:
+def test_practice_page_embeds_missing_asset_debug_for_broken_paths(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     images_dir = tmp_path / "output" / "images"
     images_dir.mkdir(parents=True)
@@ -82,6 +82,8 @@ def test_practice_page_skips_records_without_both_images(tmp_path: Path, monkeyp
     result = build_practice_page(question_bank, tmp_path / "output" / "practice")
     html = result.html_path.read_text(encoding="utf-8")
 
-    assert result.usable_records == 0
-    assert result.skipped_records == 2
-    assert "No usable records were embedded in this page." in html
+    assert result.usable_records == 1
+    assert result.skipped_records == 1
+    assert "../images/missing.png" in html
+    assert '"markscheme_image_exists":false' in html
+    assert "Practice image failed to load" in html

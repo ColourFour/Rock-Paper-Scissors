@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 import json
+import logging
+import os
 from pathlib import Path
 import re
 from typing import Any, Iterable, Mapping
@@ -18,6 +20,7 @@ DIFFICULTY_SECTIONS = {
     "difficult": "Hard",
 }
 SECTION_ORDER = ["easy", "average", "difficult"]
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -25,6 +28,15 @@ class TopicPDFResult:
     pdf_paths: list[Path]
     skipped_count: int
     review_path: Path | None = None
+    mark_scheme_link_count: int = 0
+    missing_mark_scheme_link_count: int = 0
+
+
+@dataclass(frozen=True)
+class TopicPDFWriteResult:
+    wrote_pdf: bool
+    mark_scheme_link_count: int = 0
+    missing_mark_scheme_link_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -38,6 +50,8 @@ class TopicPDFQuestion:
     marks_if_available: int | None
     source_pdf: str = ""
     page_numbers: list[int] | None = None
+    markscheme_image_path: Path | None = None
+    markscheme_image_raw: str = ""
 
 
 def build_topic_pdfs_from_records(records: Iterable[QuestionRecord | Mapping[str, Any]], config: AppConfig) -> TopicPDFResult:
@@ -60,13 +74,30 @@ def build_topic_pdfs(records: list[Mapping[str, Any]], config: AppConfig) -> Top
     output_dir.mkdir(parents=True, exist_ok=True)
 
     pdf_paths: list[Path] = []
+    mark_scheme_link_count = 0
+    missing_mark_scheme_link_count = 0
     for topic, questions in sorted(grouped.items()):
         pdf_path = output_dir / f"{_safe_filename(topic)}.pdf"
-        if _write_topic_pdf(topic, questions, pdf_path, config, review_items):
+        write_result = _write_topic_pdf(topic, questions, pdf_path, config, review_items)
+        mark_scheme_link_count += write_result.mark_scheme_link_count
+        missing_mark_scheme_link_count += write_result.missing_mark_scheme_link_count
+        if write_result.wrote_pdf:
             pdf_paths.append(pdf_path)
 
     review_path = append_review_items(review_items, config) if review_items else None
-    return TopicPDFResult(pdf_paths=pdf_paths, skipped_count=len(review_items), review_path=review_path)
+    if config.topic_pdfs.include_mark_scheme_link:
+        LOGGER.info(
+            "Topic PDF mark scheme links: added=%s missing_path=%s",
+            mark_scheme_link_count,
+            missing_mark_scheme_link_count,
+        )
+    return TopicPDFResult(
+        pdf_paths=pdf_paths,
+        skipped_count=len(review_items),
+        review_path=review_path,
+        mark_scheme_link_count=mark_scheme_link_count,
+        missing_mark_scheme_link_count=missing_mark_scheme_link_count,
+    )
 
 
 def _valid_questions(records: list[Mapping[str, Any]]) -> tuple[list[TopicPDFQuestion], list[ReviewItem]]:
@@ -93,6 +124,8 @@ def _valid_questions(records: list[Mapping[str, Any]]) -> tuple[list[TopicPDFQue
         if not screenshot_path.exists():
             review_items.append(_review_item(record, "topic_pdf_missing_image"))
             continue
+        markscheme_image_raw = str(record.get("markscheme_image") or "").strip()
+        markscheme_image_path = _resolve_path(markscheme_image_raw) if markscheme_image_raw else None
 
         valid.append(
             TopicPDFQuestion(
@@ -105,6 +138,8 @@ def _valid_questions(records: list[Mapping[str, Any]]) -> tuple[list[TopicPDFQue
                 marks_if_available=_optional_int(record.get("marks_if_available") or record.get("marks")),
                 source_pdf=str(record.get("source_pdf") or ""),
                 page_numbers=_page_numbers(record.get("page_numbers")),
+                markscheme_image_path=markscheme_image_path,
+                markscheme_image_raw=markscheme_image_raw,
             )
         )
     return valid, review_items
@@ -123,7 +158,7 @@ def _write_topic_pdf(
     pdf_path: Path,
     config: AppConfig,
     review_items: list[ReviewItem],
-) -> bool:
+) -> TopicPDFWriteResult:
     try:
         from PIL import Image as PILImage
         from reportlab.lib import colors
@@ -169,11 +204,30 @@ def _write_topic_pdf(
         textColor=colors.HexColor("#333333"),
         spaceAfter=4,
     )
+    link_style = ParagraphStyle(
+        "MarkSchemeLink",
+        parent=styles["Normal"],
+        fontSize=config.topic_pdfs.caption_font_size,
+        leading=config.topic_pdfs.caption_font_size + 3,
+        textColor=colors.HexColor("#1F3A5F"),
+        spaceBefore=3,
+        spaceAfter=1,
+    )
+    path_style = ParagraphStyle(
+        "MarkSchemePath",
+        parent=styles["Normal"],
+        fontSize=max(6, config.topic_pdfs.caption_font_size - 1),
+        leading=max(8, config.topic_pdfs.caption_font_size + 2),
+        textColor=colors.HexColor("#666666"),
+        spaceAfter=4,
+    )
 
     story: list[Any] = [Paragraph(_topic_title(topic), title_style)]
     usable_width = min(doc.width, config.topic_pdfs.image_max_width)
     usable_height = max(72, doc.height - 90)
     included = 0
+    mark_scheme_link_count = 0
+    missing_mark_scheme_link_count = 0
 
     for difficulty in SECTION_ORDER:
         section_questions = _sorted_questions(question for question in questions if question.difficulty == difficulty)
@@ -194,21 +248,46 @@ def _write_topic_pdf(
             draw_width = width_px * scale
             draw_height = height_px * scale
             caption = _caption(question)
+            elements: list[Any] = [
+                Paragraph(caption, caption_style),
+                Image(str(question.screenshot_path), width=draw_width, height=draw_height),
+            ]
+            if config.topic_pdfs.include_mark_scheme_link:
+                link_target = _mark_scheme_link_target(question, pdf_path.parent)
+                if link_target:
+                    elements.extend(
+                        [
+                            Paragraph(
+                                f'<link href="{_escape_xml_attr(link_target)}"><u>Open mark scheme image</u></link>',
+                                link_style,
+                            ),
+                            Paragraph(f"Mark scheme image: {_escape_xml(link_target)}", path_style),
+                        ]
+                    )
+                    mark_scheme_link_count += 1
+                else:
+                    elements.append(Paragraph("Mark scheme image: not available", path_style))
+                    missing_mark_scheme_link_count += 1
+            elements.append(Spacer(1, 12))
             story.append(
                 KeepTogether(
-                    [
-                        Paragraph(caption, caption_style),
-                        Image(str(question.screenshot_path), width=draw_width, height=draw_height),
-                        Spacer(1, 12),
-                    ]
+                    elements
                 )
             )
             included += 1
 
     if included == 0:
-        return False
+        return TopicPDFWriteResult(
+            wrote_pdf=False,
+            mark_scheme_link_count=mark_scheme_link_count,
+            missing_mark_scheme_link_count=missing_mark_scheme_link_count,
+        )
     doc.build(story)
-    return True
+    return TopicPDFWriteResult(
+        wrote_pdf=True,
+        mark_scheme_link_count=mark_scheme_link_count,
+        missing_mark_scheme_link_count=missing_mark_scheme_link_count,
+    )
 
 
 def _sorted_questions(questions: Iterable[TopicPDFQuestion]) -> list[TopicPDFQuestion]:
@@ -280,6 +359,15 @@ def _resolve_path(raw_path: str) -> Path:
     return Path.cwd() / path
 
 
+def _mark_scheme_link_target(question: TopicPDFQuestion, pdf_dir: Path) -> str:
+    if not question.markscheme_image_raw or question.markscheme_image_path is None:
+        return ""
+    try:
+        return Path(os.path.relpath(question.markscheme_image_path, start=pdf_dir)).as_posix()
+    except ValueError:
+        return question.markscheme_image_path.as_uri() if question.markscheme_image_path.is_absolute() else question.markscheme_image_raw
+
+
 def _optional_int(value: Any) -> int | None:
     if value in {None, ""}:
         return None
@@ -318,3 +406,7 @@ def _topic_title(topic: str) -> str:
 
 def _escape_xml(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _escape_xml_attr(text: str) -> str:
+    return _escape_xml(text).replace('"', "&quot;")

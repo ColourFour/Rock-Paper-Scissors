@@ -6,8 +6,9 @@ from pathlib import Path
 
 from .classification import classify_question, classify_question_parts, infer_source_paper_code
 from .config import AppConfig
-from .document_metadata import parse_filename_metadata, parse_internal_document_metadata, reconcile_document_metadata
-from .examiner_reports import examiner_report_evidence
+from .document_metadata import DocumentMetadata, parse_filename_metadata, parse_internal_document_metadata, reconcile_document_metadata
+from .document_registry import DocumentRegistry, build_document_registry, build_document_registry_from_paths
+from .examiner_reports import examiner_report_topic_evidence
 from .exporters import export_records
 from .image_rendering import render_question_image
 from .mark_schemes import MarkSchemeImageResult, extract_mark_scheme_answers, find_mark_scheme, render_mark_scheme_images
@@ -27,10 +28,37 @@ class PipelineResult:
 
 def process_batch(config: AppConfig) -> PipelineResult:
     config.ensure_output_dirs()
-    question_pdfs = sorted(config.input.question_papers_dir.glob("*.pdf"))
+    registry = build_document_registry_from_paths(
+        [
+            config.input.question_papers_dir,
+            config.input.mark_schemes_dir,
+            config.input.examiner_reports_dir,
+        ]
+    )
+    return _process_registry_entries(registry, config)
+
+
+def process_folder(folder: str | Path, config: AppConfig) -> PipelineResult:
+    config.ensure_output_dirs()
+    registry = build_document_registry(folder)
+    return _process_registry_entries(registry, config)
+
+
+def _process_registry_entries(registry: DocumentRegistry, config: AppConfig) -> PipelineResult:
     records: list[QuestionRecord] = []
-    for question_pdf in question_pdfs:
-        records.extend(build_records_for_pdf(question_pdf, config))
+    for entry in registry.question_paper_entries():
+        assert entry.question_paper is not None
+        question_metadata = entry.metadata_by_path.get(str(entry.question_paper))
+        records.extend(
+            build_records_for_pdf(
+                entry.question_paper,
+                config,
+                mark_scheme_pdf=entry.mark_scheme,
+                examiner_report_paths=entry.examiner_reports,
+                filename_metadata=question_metadata,
+                registry_warnings=entry.warnings,
+            )
+        )
     json_path, csv_path = export_records(records, config)
     review_path = write_review_file(records, config)
     _write_batch_diagnostic(records, config)
@@ -51,12 +79,15 @@ def build_records_for_pdf(
     question_pdf: str | Path,
     config: AppConfig,
     mark_scheme_pdf: str | Path | None = None,
+    examiner_report_paths: list[Path] | None = None,
+    filename_metadata: DocumentMetadata | None = None,
+    registry_warnings: list[str] | None = None,
 ) -> list[QuestionRecord]:
     question_pdf = Path(question_pdf)
     layouts = extract_pdf_layout(question_pdf, config)
-    filename_metadata = parse_filename_metadata(question_pdf)
+    parsed_filename_metadata = filename_metadata or parse_filename_metadata(question_pdf)
     internal_metadata = parse_internal_document_metadata(layouts)
-    document_metadata = reconcile_document_metadata(filename_metadata, internal_metadata)
+    document_metadata = reconcile_document_metadata(parsed_filename_metadata, internal_metadata)
     spans = detect_question_spans(layouts, question_pdf, config)
     expected_numbers = [span.question_number for span in spans if span.question_number.isdigit()]
 
@@ -88,6 +119,7 @@ def build_records_for_pdf(
         flags = list(span.review_flags)
         flags.extend(mark_scheme_flags)
         flags.extend(document_metadata.warnings)
+        flags.extend(registry_warnings or [])
         if matched_mark_scheme and matched_mark_scheme.exists() and not answer_text:
             flags.append("unmatched_answer")
         mark_scheme_image = mark_scheme_images.get(span.question_number)
@@ -106,7 +138,14 @@ def build_records_for_pdf(
             flags.append("low_confidence_question_crop")
         question_text = render_result.extracted_text or span.combined_text
         marks = extract_marks_from_text(question_text)
-        examiner_text = examiner_report_evidence(question_pdf, config.input.examiner_reports_dir, span.question_number)
+        examiner_evidence = examiner_report_topic_evidence(
+            question_pdf,
+            config.input.examiner_reports_dir,
+            span.question_number,
+            config,
+            report_paths=examiner_report_paths,
+        )
+        examiner_text = examiner_evidence.classification_text if examiner_evidence else ""
         classification = classify_question(
             question_text,
             marks,
@@ -148,7 +187,7 @@ def build_records_for_pdf(
                 syllabus_code=document_metadata.syllabus,
                 session=document_metadata.session,
                 year=document_metadata.year,
-                document_type=document_metadata.document_type or "QP",
+                document_type=document_metadata.document_type or "question_paper",
                 component=document_metadata.component,
                 document_key=document_metadata.canonical_key,
                 metadata_source=document_metadata.source,
@@ -163,7 +202,11 @@ def build_records_for_pdf(
                 subtopic=str(question_topic["subtopic"]),
                 topic_confidence=str(question_topic["topic_confidence"]),
                 topic_evidence=classification.topic_evidence,
-                topic_evidence_details=classification.topic_evidence_details,
+                topic_evidence_details={
+                    **classification.topic_evidence_details,
+                    **({"examiner_report_structured": examiner_evidence.to_dict()} if examiner_evidence else {}),
+                },
+                examiner_report_evidence=examiner_evidence.to_dict() if examiner_evidence else {},
                 secondary_topics=list(question_topic["secondary_topics"]),
                 topic_uncertain=bool(question_topic["topic_uncertain"]),
                 difficulty=classification.difficulty,
@@ -178,6 +221,7 @@ def build_records_for_pdf(
                 crop_uncertain=render_result.crop_uncertain,
                 question_crop_confidence="low" if render_result.crop_uncertain else "high",
                 crop_debug_paths=render_result.debug_paths,
+                question_crop_diagnostics=render_result.crop_diagnostics,
                 topic_alternatives=classification.alternative_topics,
                 markscheme_image=_display_path(mark_scheme_image.image_path) if mark_scheme_image and mark_scheme_image.image_path else "",
                 markscheme_pages=mark_scheme_image.page_numbers if mark_scheme_image else [],
