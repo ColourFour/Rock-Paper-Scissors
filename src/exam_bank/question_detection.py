@@ -380,7 +380,6 @@ def _is_cover_instruction_page(page: PageLayout) -> bool:
         "instructions" in lowered
         and "information" in lowered
         and ("you will need" in lowered or "answer all questions" in lowered)
-        and not re.search(r"^\s*1\s+\S", text, re.MULTILINE)
     )
 
 
