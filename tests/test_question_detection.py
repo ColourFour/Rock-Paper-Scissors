@@ -2,8 +2,9 @@ from pathlib import Path
 
 from exam_bank.config import AppConfig
 from exam_bank.exporters import write_csv, write_json
+from exam_bank.identifiers import normalize_question_id
 from exam_bank.image_rendering import _detect_prompt_regions
-from exam_bank.mark_schemes import _detect_mark_scheme_tables, _detect_table_question_anchors, _table_regions_for_anchor, find_mark_scheme
+from exam_bank.mark_schemes import _detect_mark_scheme_tables, _detect_table_question_anchors, _parse_mark_scheme_question_cell, _table_regions_for_anchor, find_mark_scheme
 from exam_bank.models import BoundingBox, PageLayout, QuestionRecord, TextBlock
 from exam_bank.question_detection import detect_question_spans, extract_marks_from_text, parse_question_start
 
@@ -75,23 +76,23 @@ def test_mark_scheme_auto_pairing(tmp_path: Path) -> None:
 def test_mark_scheme_table_mapping_merges_blank_question_number_continuation_rows() -> None:
     config = AppConfig()
     layout = PageLayout(
-        page_number=1,
+        page_number=6,
         width=595,
         height=842,
         blocks=[
-            cell(1, "Question", 100, x=45, width=55),
-            cell(1, "Answer", 100, x=130, width=50),
-            cell(1, "Marks", 100, x=390, width=45),
-            cell(1, "Guidance", 100, x=455, width=65),
-            cell(1, "1", 135, x=50, width=10),
-            cell(1, "x = 2", 135, x=130),
-            cell(1, "M1", 135, x=390, width=25),
-            cell(1, "Allow equivalent", 135, x=455, width=120),
-            cell(1, "continued working", 165, x=130, width=120),
-            cell(1, "A1", 165, x=390, width=25),
-            cell(1, "further guidance for same question", 195, x=455, width=120),
-            cell(1, "2", 220, x=50, width=10),
-            cell(1, "Differentiate", 220, x=130, width=100),
+            cell(6, "Question", 100, x=45, width=55),
+            cell(6, "Answer", 100, x=130, width=50),
+            cell(6, "Marks", 100, x=390, width=45),
+            cell(6, "Guidance", 100, x=455, width=65),
+            cell(6, "1", 135, x=50, width=10),
+            cell(6, "x = 2", 135, x=130),
+            cell(6, "M1", 135, x=390, width=25),
+            cell(6, "Allow equivalent", 135, x=455, width=120),
+            cell(6, "continued working", 165, x=130, width=120),
+            cell(6, "A1", 165, x=390, width=25),
+            cell(6, "further guidance for same question", 195, x=455, width=120),
+            cell(6, "2", 220, x=50, width=10),
+            cell(6, "Differentiate", 220, x=130, width=100),
         ],
     )
 
@@ -99,63 +100,126 @@ def test_mark_scheme_table_mapping_merges_blank_question_number_continuation_row
     anchors = _detect_table_question_anchors([layout], tables, config, ["1", "2"])
     regions, flags = _table_regions_for_anchor([layout], tables, anchors[0], anchors[1], config)
 
-    assert tables[1].question_col_right < 130
+    assert tables[6].question_col_right < 130
     assert [anchor.question_number for anchor in anchors] == ["1", "2"]
     assert not flags
     assert len(regions) == 1
     assert regions[0].bbox.y0 < 105
     assert regions[0].bbox.y1 > 195
     assert regions[0].bbox.y1 < 220
-    assert regions[0].bbox.x0 <= tables[1].bbox.x0
-    assert regions[0].bbox.x1 >= tables[1].bbox.x1
+    assert regions[0].bbox.x0 <= tables[6].bbox.x0
+    assert regions[0].bbox.x1 >= tables[6].bbox.x1
+    assert regions[0].continuation_rows_included
 
 
-def test_mark_scheme_table_detection_requires_answer_table_headers() -> None:
+def test_mark_scheme_answer_table_before_page_6_is_rejected() -> None:
     config = AppConfig()
     layout = PageLayout(
-        page_number=1,
+        page_number=5,
         width=595,
         height=842,
         blocks=[
-            cell(1, "Question", 100, x=45, width=55),
-            cell(1, "Mark Scheme", 100, x=130, width=80),
-            cell(1, "Rules", 100, x=390, width=45),
-            cell(1, "1", 135, x=50, width=10),
-            cell(1, "General rubric", 135, x=130, width=120),
+            cell(5, "Question", 100, x=45, width=55),
+            cell(5, "Answer", 100, x=130, width=50),
+            cell(5, "Marks", 100, x=390, width=45),
+            cell(5, "Guidance", 100, x=455, width=65),
+            cell(5, "1", 135, x=50, width=10),
+            cell(5, "x = 2", 135, x=130),
         ],
     )
 
     assert _detect_mark_scheme_tables([layout], config) == {}
 
 
-def test_mark_scheme_table_detection_ignores_earlier_non_answer_table() -> None:
+def test_question_id_normalization_preserves_subparts() -> None:
+    assert normalize_question_id("3 a") == "3(a)"
+    assert normalize_question_id("3(a)") == "3(a)"
+    assert normalize_question_id("3a") == "3(a)"
+    assert normalize_question_id("Question 3(a)") == "3(a)"
+    assert _parse_mark_scheme_question_cell("3(b)", {"3(b)"}) == "3(b)"
+
+
+def test_mark_scheme_table_detection_requires_answer_table_headers() -> None:
     config = AppConfig()
     layout = PageLayout(
-        page_number=1,
+        page_number=6,
         width=595,
         height=842,
         blocks=[
-            cell(1, "Question", 80, x=45, width=55),
-            cell(1, "Mark Scheme", 80, x=130, width=80),
-            cell(1, "Rules", 80, x=390, width=45),
-            cell(1, "1", 110, x=50, width=10),
-            cell(1, "General rubric", 110, x=130, width=120),
-            cell(1, "Question", 210, x=45, width=55),
-            cell(1, "Answer", 210, x=130, width=50),
-            cell(1, "Marks", 210, x=390, width=45),
-            cell(1, "Guidance", 210, x=455, width=65),
-            cell(1, "1", 245, x=50, width=10),
-            cell(1, "x = 2", 245, x=130),
-            cell(1, "B1", 245, x=390, width=25),
+            cell(6, "Question", 100, x=45, width=55),
+            cell(6, "Mark Scheme", 100, x=130, width=80),
+            cell(6, "Rules", 100, x=390, width=45),
+            cell(6, "1", 135, x=50, width=10),
+            cell(6, "General rubric", 135, x=130, width=120),
+        ],
+    )
+
+    assert _detect_mark_scheme_tables([layout], config) == {}
+
+
+def test_mark_scheme_subpart_matching_keeps_3a_and_3b_separate() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=6,
+        width=595,
+        height=842,
+        blocks=[
+            cell(6, "Question", 100, x=45, width=55),
+            cell(6, "Answer", 100, x=130, width=50),
+            cell(6, "Marks", 100, x=390, width=45),
+            cell(6, "Guidance", 100, x=455, width=65),
+            cell(6, "3(a)", 135, x=50, width=35),
+            cell(6, "Part a answer", 135, x=130, width=100),
+            cell(6, "B1", 135, x=390, width=25),
+            cell(6, "3(b)", 170, x=50, width=35),
+            cell(6, "Part b answer", 170, x=130, width=100),
+            cell(6, "M1", 170, x=390, width=25),
+            cell(6, "4", 210, x=50, width=10),
+            cell(6, "Next question", 210, x=130, width=100),
+        ],
+    )
+
+    tables = _detect_mark_scheme_tables([layout], config)
+    anchors = _detect_table_question_anchors([layout], tables, config, ["3(a)", "3(b)", "4"])
+    region_a, flags_a = _table_regions_for_anchor([layout], tables, anchors[0], anchors[1], config)
+    region_b, flags_b = _table_regions_for_anchor([layout], tables, anchors[1], anchors[2], config)
+
+    assert [anchor.question_number for anchor in anchors] == ["3(a)", "3(b)", "4"]
+    assert not flags_a
+    assert not flags_b
+    assert region_a[0].bbox.y1 <= anchors[1].y0
+    assert region_b[0].bbox.y0 < anchors[1].y0
+    assert region_b[0].bbox.y1 <= anchors[2].y0
+
+
+def test_mark_scheme_table_detection_ignores_earlier_non_answer_table() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=6,
+        width=595,
+        height=842,
+        blocks=[
+            cell(6, "Question", 80, x=45, width=55),
+            cell(6, "Mark Scheme", 80, x=130, width=80),
+            cell(6, "Rules", 80, x=390, width=45),
+            cell(6, "1", 110, x=50, width=10),
+            cell(6, "General rubric", 110, x=130, width=120),
+            cell(6, "Question", 210, x=45, width=55),
+            cell(6, "Answer", 210, x=130, width=50),
+            cell(6, "Marks", 210, x=390, width=45),
+            cell(6, "Guidance", 210, x=455, width=65),
+            cell(6, "1", 245, x=50, width=10),
+            cell(6, "x = 2", 245, x=130),
+            cell(6, "B1", 245, x=390, width=25),
         ],
     )
 
     tables = _detect_mark_scheme_tables([layout], config)
     anchors = _detect_table_question_anchors([layout], tables, config, ["1"])
 
-    assert list(tables) == [1]
-    assert tables[1].header_detected == ["Question", "Answer", "Marks", "Guidance"]
-    assert tables[1].header_bottom > 210
+    assert list(tables) == [6]
+    assert tables[6].header_detected == ["Question", "Answer", "Marks", "Guidance"]
+    assert tables[6].header_bottom > 210
     assert [anchor.question_number for anchor in anchors] == ["1"]
     assert anchors[0].y0 == 245
 
@@ -163,21 +227,21 @@ def test_mark_scheme_table_detection_ignores_earlier_non_answer_table() -> None:
 def test_mark_scheme_table_crop_includes_header_row_and_full_width() -> None:
     config = AppConfig()
     layout = PageLayout(
-        page_number=1,
+        page_number=6,
         width=595,
         height=842,
         blocks=[
-            cell(1, "Question", 100, x=45, width=55),
-            cell(1, "Answer", 100, x=130, width=50),
-            cell(1, "Marks", 100, x=390, width=45),
-            cell(1, "Guidance", 100, x=455, width=65),
-            cell(1, "1", 140, x=50, width=10),
-            cell(1, "Solution line", 140, x=130, width=120),
-            cell(1, "M1", 140, x=390, width=25),
-            cell(1, "Total", 172, x=130, width=45),
-            cell(1, "5", 172, x=390, width=10),
-            cell(1, "2", 210, x=50, width=10),
-            cell(1, "Next question", 210, x=130, width=100),
+            cell(6, "Question", 100, x=45, width=55),
+            cell(6, "Answer", 100, x=130, width=50),
+            cell(6, "Marks", 100, x=390, width=45),
+            cell(6, "Guidance", 100, x=455, width=65),
+            cell(6, "1", 140, x=50, width=10),
+            cell(6, "Solution line", 140, x=130, width=120),
+            cell(6, "M1", 140, x=390, width=25),
+            cell(6, "Total", 172, x=130, width=45),
+            cell(6, "5", 172, x=390, width=10),
+            cell(6, "2", 210, x=50, width=10),
+            cell(6, "Next question", 210, x=130, width=100),
         ],
     )
 
@@ -187,9 +251,9 @@ def test_mark_scheme_table_crop_includes_header_row_and_full_width() -> None:
 
     assert not flags
     assert len(regions) == 1
-    assert regions[0].bbox.x0 == tables[1].bbox.x0
-    assert regions[0].bbox.x1 == tables[1].bbox.x1
-    assert regions[0].bbox.y0 <= tables[1].bbox.y0
+    assert regions[0].bbox.x0 == tables[6].bbox.x0
+    assert regions[0].bbox.x1 == tables[6].bbox.x1
+    assert regions[0].bbox.y0 <= tables[6].bbox.y0
     assert regions[0].bbox.y0 < anchors[0].y0
     assert regions[0].bbox.y1 > 172
     assert regions[0].bbox.y1 < anchors[1].y0
@@ -198,20 +262,20 @@ def test_mark_scheme_table_crop_includes_header_row_and_full_width() -> None:
 def test_mark_scheme_table_crop_prefers_visible_ruling_lines() -> None:
     config = AppConfig()
     layout = PageLayout(
-        page_number=1,
+        page_number=6,
         width=595,
         height=842,
         blocks=[
-            cell(1, "Question", 100, x=45, width=55),
-            cell(1, "Answer", 100, x=130, width=50),
-            cell(1, "Marks", 100, x=390, width=45),
-            cell(1, "Guidance", 100, x=455, width=65),
-            cell(1, "1", 140, x=50, width=10),
-            cell(1, "Solution line", 140, x=130, width=120),
-            cell(1, "Total", 172, x=130, width=45),
-            cell(1, "5", 172, x=390, width=10),
-            cell(1, "2", 212, x=50, width=10),
-            cell(1, "Next question", 212, x=130, width=100),
+            cell(6, "Question", 100, x=45, width=55),
+            cell(6, "Answer", 100, x=130, width=50),
+            cell(6, "Marks", 100, x=390, width=45),
+            cell(6, "Guidance", 100, x=455, width=65),
+            cell(6, "1", 140, x=50, width=10),
+            cell(6, "Solution line", 140, x=130, width=120),
+            cell(6, "Total", 172, x=130, width=45),
+            cell(6, "5", 172, x=390, width=10),
+            cell(6, "2", 212, x=50, width=10),
+            cell(6, "Next question", 212, x=130, width=100),
         ],
         graphics=[
             hline(95),
@@ -294,7 +358,9 @@ def test_record_json_schema_contains_required_fields(tmp_path: Path) -> None:
         "topic",
         "subtopic",
         "topic_confidence",
+        "topic_confidence_score",
         "topic_evidence",
+        "topic_evidence_details",
         "secondary_topics",
         "topic_uncertain",
         "topic_alternatives",
@@ -317,6 +383,9 @@ def test_record_json_schema_contains_required_fields(tmp_path: Path) -> None:
         "markscheme_table_header_detected",
         "markscheme_nearby_anchors",
         "markscheme_debug_paths",
+        "markscheme_table_header_ok",
+        "mark_scheme",
+        "qa",
     ]:
         assert f'"{key}"' in data
 

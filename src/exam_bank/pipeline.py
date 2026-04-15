@@ -6,6 +6,8 @@ from pathlib import Path
 
 from .classification import classify_question, classify_question_parts, infer_source_paper_code
 from .config import AppConfig
+from .document_metadata import parse_filename_metadata, parse_internal_document_metadata, reconcile_document_metadata
+from .examiner_reports import examiner_report_evidence
 from .exporters import export_records
 from .image_rendering import render_question_image
 from .mark_schemes import MarkSchemeImageResult, extract_mark_scheme_answers, find_mark_scheme, render_mark_scheme_images
@@ -52,6 +54,9 @@ def build_records_for_pdf(
 ) -> list[QuestionRecord]:
     question_pdf = Path(question_pdf)
     layouts = extract_pdf_layout(question_pdf, config)
+    filename_metadata = parse_filename_metadata(question_pdf)
+    internal_metadata = parse_internal_document_metadata(layouts)
+    document_metadata = reconcile_document_metadata(filename_metadata, internal_metadata)
     spans = detect_question_spans(layouts, question_pdf, config)
     expected_numbers = [span.question_number for span in spans if span.question_number.isdigit()]
 
@@ -77,10 +82,12 @@ def build_records_for_pdf(
 
     records: list[QuestionRecord] = []
     source_paper_code, _source_paper_code_confidence = infer_source_paper_code(question_pdf.name)
+    source_paper_code = document_metadata.component or source_paper_code
     for span in spans:
         answer_text = answers.get(span.question_number, "")
         flags = list(span.review_flags)
         flags.extend(mark_scheme_flags)
+        flags.extend(document_metadata.warnings)
         if matched_mark_scheme and matched_mark_scheme.exists() and not answer_text:
             flags.append("unmatched_answer")
         mark_scheme_image = mark_scheme_images.get(span.question_number)
@@ -99,10 +106,31 @@ def build_records_for_pdf(
             flags.append("low_confidence_question_crop")
         question_text = render_result.extracted_text or span.combined_text
         marks = extract_marks_from_text(question_text)
-        classification = classify_question(question_text, marks, config, context_flags=flags, source_name=question_pdf.name)
-        part_level_topics = classify_question_parts(question_text, span.question_number, config, context_flags=flags, source_name=question_pdf.name)
+        examiner_text = examiner_report_evidence(question_pdf, config.input.examiner_reports_dir, span.question_number)
+        classification = classify_question(
+            question_text,
+            marks,
+            config,
+            context_flags=flags,
+            source_name=question_pdf.name,
+            examiner_report_text=examiner_text,
+            mark_scheme_text=answer_text,
+            question_ocr_text=question_text if "ocr_question_text" in flags else "",
+        )
+        part_level_topics = classify_question_parts(
+            question_text,
+            span.question_number,
+            config,
+            context_flags=flags,
+            source_name=question_pdf.name,
+            examiner_report_text=examiner_text,
+            mark_scheme_text=answer_text,
+            question_ocr_text=question_text if "ocr_question_text" in flags else "",
+        )
         question_topic = _question_topic_from_parts(classification, part_level_topics)
+        qa_flags = _record_qa_flags(str(question_topic["paper_family"]), str(question_topic["topic"]), config, mark_scheme_image)
         flags.extend(question_topic["review_flags"])
+        flags.extend(qa_flags)
         flags.extend(render_result.review_flags)
         confidence = _record_confidence(float(question_topic["confidence"]), flags)
 
@@ -117,6 +145,13 @@ def build_records_for_pdf(
                 answer_text=answer_text,
                 paper_family=str(question_topic["paper_family"]),
                 source_paper_code=source_paper_code,
+                syllabus_code=document_metadata.syllabus,
+                session=document_metadata.session,
+                year=document_metadata.year,
+                document_type=document_metadata.document_type or "QP",
+                component=document_metadata.component,
+                document_key=document_metadata.canonical_key,
+                metadata_source=document_metadata.source,
                 source_paper_family=classification.source_paper_family,
                 inferred_paper_family=classification.inferred_paper_family,
                 paper_family_confidence=classification.paper_family_confidence,
@@ -128,6 +163,7 @@ def build_records_for_pdf(
                 subtopic=str(question_topic["subtopic"]),
                 topic_confidence=str(question_topic["topic_confidence"]),
                 topic_evidence=classification.topic_evidence,
+                topic_evidence_details=classification.topic_evidence_details,
                 secondary_topics=list(question_topic["secondary_topics"]),
                 topic_uncertain=bool(question_topic["topic_uncertain"]),
                 difficulty=classification.difficulty,
@@ -152,11 +188,39 @@ def build_records_for_pdf(
                 markscheme_table_header_detected=mark_scheme_image.table_header_detected if mark_scheme_image else [],
                 markscheme_nearby_anchors=mark_scheme_image.nearby_anchors if mark_scheme_image else [],
                 markscheme_debug_paths=mark_scheme_image.debug_paths if mark_scheme_image else [],
+                markscheme_table_header_ok=mark_scheme_image.table_header_ok if mark_scheme_image else False,
+                markscheme_continuation_rows_included=mark_scheme_image.continuation_rows_included if mark_scheme_image else False,
+                qa_status="fail" if any(flag.startswith("qa_fail_") for flag in qa_flags) else ("warning" if qa_flags else "pass"),
+                qa_flags=qa_flags,
             )
         )
     _write_pdf_diagnostic(question_pdf, layouts, spans, records, config)
     _write_topic_debug_report(question_pdf, records, config)
     return records
+
+
+def _record_qa_flags(
+    paper_family: str,
+    topic: str,
+    config: AppConfig,
+    mark_scheme_image: MarkSchemeImageResult | None,
+) -> list[str]:
+    flags: list[str] = []
+    allowed_topics = set(config.paper_family_taxonomy.get(paper_family, {}))
+    if paper_family in config.paper_family_taxonomy and topic not in allowed_topics:
+        flags.append("qa_fail_invalid_topic_for_paper")
+    if mark_scheme_image:
+        if any(page < 6 for page in mark_scheme_image.page_numbers):
+            flags.append("qa_fail_markscheme_page_before_6")
+        if mark_scheme_image.image_path and not mark_scheme_image.table_header_ok:
+            flags.append("qa_fail_markscheme_header_not_ok")
+        if mark_scheme_image.image_path and not mark_scheme_image.markscheme_question_number:
+            flags.append("qa_fail_markscheme_label_missing")
+        if "markscheme_continuation_maybe_truncated" in mark_scheme_image.review_flags:
+            flags.append("qa_warn_markscheme_continuation_maybe_truncated")
+        if "markscheme_parent_label_match" in mark_scheme_image.review_flags:
+            flags.append("qa_warn_markscheme_parent_label_match")
+    return sorted(set(flags))
 
 
 def _record_confidence(classification_confidence: float, flags: list[str]) -> float:

@@ -2,6 +2,7 @@ input:
   question_papers_dir: input/question_papers
   mark_schemes_dir: input/mark_schemes
   mappings_dir: input/mappings
+  examiner_reports_dir: input/examiner_reports
 
 output:
   images_dir: output/images

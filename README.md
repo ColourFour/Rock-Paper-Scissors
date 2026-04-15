@@ -23,16 +23,20 @@ input/
   question_papers/
   mark_schemes/
   mappings/
+  examiner_reports/
 output/
   images/
   json/
   csv/
   review/
+  qa/
+  practice/
   topic_pdfs/
   debug/
 ```
 
 Put question papers in `input/question_papers/` and mark schemes in `input/mark_schemes/`.
+Optional examiner report text or JSON files can go in `input/examiner_reports/`; when present, the classifier uses matching paper/question comments as strong topic evidence.
 
 ## Setup
 
@@ -77,6 +81,8 @@ output/images/
 output/json/
 output/csv/
 output/review/
+output/qa/
+output/practice/
 output/topic_pdfs/
 output/debug/   # only populated when debug.enabled is true
 ```
@@ -146,32 +152,64 @@ Hard    -> difficulty: difficult
 
 Questions are sorted inside each section by `subtopic`, then `paper_name`, then `question_number`. Each entry uses the existing cropped PNG and a small caption with paper name, question number, subtopic, and marks when available. Records with missing topic, difficulty, or image paths are skipped and logged in `output/review/review_items.csv`.
 
-## Student Practice Prototype
+## QA Review
 
-The minimal student page lives at:
-
-```text
-app/student_practice/
-```
-
-After generating `output/json/question_bank.json`, serve the repo root locally:
+After `output/json/question_bank.json` exists, run deterministic QA checks against the existing JSON and image files:
 
 ```bash
-python3 -m http.server 8000
+python -m exam_bank.cli qa --config config.yaml
 ```
 
-Then open:
+To point QA at another export:
 
-```text
-http://localhost:8000/app/student_practice/
+```bash
+python -m exam_bank.cli qa --config config.yaml --question-bank output/json/question_bank.json
 ```
 
-The page lets a student choose a paper and topic, get a random question image matching both, and click `Check answer` to reveal the matched mark scheme image. It reads these generated fields:
+To write only failing records:
+
+```bash
+python -m exam_bank.cli qa --config config.yaml --only-failed
+```
+
+QA focuses on P1, P3, P4, and P5. P2 and P6 records are skipped and counted in the JSON summary. The reports are written to:
 
 ```text
-paper_name
+output/qa/qa_report.json
+output/qa/qa_report.csv
+output/qa/review.html
+```
+
+The review page is static. Serve the repo root locally, then open:
+
+```text
+http://localhost:8000/output/qa/review.html
+```
+
+## Student Practice Page
+
+After generating `output/json/question_bank.json`, build a browser-only practice page:
+
+```bash
+python -m exam_bank.cli practice-page --config config.yaml
+```
+
+To point it at another export:
+
+```bash
+python -m exam_bank.cli practice-page --config config.yaml --question-bank output/json/question_bank.json
+```
+
+This writes:
+
+```text
+output/practice/index.html
+```
+
+Open that file directly from Finder or your browser. It does not fetch local JSON and does not need a local server. The generated HTML embeds a small usable record set with these fields:
+
+```text
 source_pdf
-source_paper_code
 paper_family
 topic
 question_number
@@ -180,7 +218,7 @@ question_image
 markscheme_image
 ```
 
-If the browser cannot fetch the default JSON file, use `Load JSON` and select the exported `question_bank.json` manually.
+The page lets a student choose a paper family and topic, get a random matching question image, and reveal the mapped mark scheme image.
 
 ## Output Schema
 

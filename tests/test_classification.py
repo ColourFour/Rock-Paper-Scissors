@@ -145,3 +145,31 @@ def test_forces_low_confidence_topic_within_known_paper_bank() -> None:
     assert result.topic in AppConfig().paper_family_taxonomy["P5"]
     assert result.topic_confidence == "low"
     assert "topic_forced_low_confidence" in result.review_flags
+
+
+def test_examiner_report_method_evidence_overrides_noisy_question_text() -> None:
+    result = classify_question(
+        "A vector is translated in a diagram and a line is drawn. [5]",
+        marks=5,
+        config=AppConfig(),
+        source_name="9709_s21_qp_12.pdf",
+        examiner_report_text="Most candidates used elimination leading to a quadratic and then considered the discriminant.",
+    )
+
+    assert result.paper_family == "P1"
+    assert result.topic == "quadratics"
+    assert result.topic in AppConfig().paper_family_taxonomy["P1"]
+    assert "examiner_report" in result.topic_evidence_details
+
+
+def test_missing_examiner_report_still_forces_valid_topic_from_fallback_rules() -> None:
+    result = classify_question(
+        "Use the common denominator and simplify the identity involving sin x and cos x. [4]",
+        marks=4,
+        config=AppConfig(),
+        source_name="9709_s21_qp_12.pdf",
+    )
+
+    assert result.paper_family == "P1"
+    assert result.topic == "trigonometry"
+    assert result.topic in AppConfig().paper_family_taxonomy["P1"]

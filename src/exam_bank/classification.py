@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import AppConfig
+from .document_metadata import parse_filename_metadata
 from .models import ClassificationResult
 
 
@@ -99,6 +100,9 @@ def classify_question(
     context_flags: list[str] | None = None,
     source_name: str | None = None,
     forced_paper_family: str | None = None,
+    examiner_report_text: str = "",
+    mark_scheme_text: str = "",
+    question_ocr_text: str = "",
 ) -> ClassificationResult:
     local = _local_classify(
         text,
@@ -107,6 +111,9 @@ def classify_question(
         context_flags=context_flags or [],
         source_name=source_name,
         forced_paper_family=forced_paper_family,
+        examiner_report_text=examiner_report_text,
+        mark_scheme_text=mark_scheme_text,
+        question_ocr_text=question_ocr_text,
     )
     if not config.classification.enable_openai:
         return local
@@ -132,6 +139,9 @@ def classify_question_parts(
     context_flags: list[str] | None = None,
     source_name: str | None = None,
     forced_paper_family: str | None = None,
+    examiner_report_text: str = "",
+    mark_scheme_text: str = "",
+    question_ocr_text: str = "",
 ) -> list[dict[str, Any]]:
     segments = split_question_parts(text, question_number)
     part_topics: list[dict[str, Any]] = []
@@ -144,6 +154,9 @@ def classify_question_parts(
             context_flags=context_flags or [],
             source_name=source_name,
             forced_paper_family=forced_paper_family,
+            examiner_report_text=examiner_report_text,
+            mark_scheme_text=mark_scheme_text,
+            question_ocr_text=question_ocr_text,
         )
         part_topics.append(
             {
@@ -185,6 +198,9 @@ def split_question_parts(text: str, question_number: str) -> list[QuestionPartSe
 
 
 def infer_source_paper_family(source_name: str | None) -> tuple[str, str]:
+    metadata = parse_filename_metadata(source_name or "")
+    if metadata.paper_family != "unknown":
+        return metadata.paper_family, "high"
     code, confidence = infer_source_paper_code(source_name)
     if code:
         return f"P{code[0]}", confidence
@@ -200,6 +216,9 @@ def infer_source_paper_family(source_name: str | None) -> tuple[str, str]:
 def infer_source_paper_code(source_name: str | None) -> tuple[str, str]:
     if not source_name:
         return "", "low"
+    metadata = parse_filename_metadata(source_name)
+    if metadata.component:
+        return metadata.component, "high"
     name = Path(source_name).name
     match = _PAPER_CODE_RE.search(name)
     if match:
@@ -217,14 +236,23 @@ def _local_classify(
     context_flags: list[str],
     source_name: str | None,
     forced_paper_family: str | None = None,
+    examiner_report_text: str = "",
+    mark_scheme_text: str = "",
+    question_ocr_text: str = "",
 ) -> ClassificationResult:
     normalized = _normalize_math_text(text)
+    evidence_sources = {
+        "examiner_report": _normalize_math_text(examiner_report_text),
+        "mark_scheme": _normalize_math_text(mark_scheme_text),
+        "question_text": normalized,
+        "question_ocr": _normalize_math_text(question_ocr_text),
+    }
 
     # Paper family is the first-stage decision. Final topic scoring must happen
     # only inside this restricted syllabus bank, not against a generic pool of
     # mathematical topics.
     family_decision = _decide_paper_family(normalized, config, source_name, forced_paper_family)
-    candidates = _score_topic_candidates(normalized, config, family_decision.allowed_families)
+    candidates = _score_topic_candidates_from_sources(evidence_sources, config, family_decision.allowed_families)
     candidates.sort(key=lambda item: item.score, reverse=True)
 
     flags: list[str] = list(family_decision.review_flags)
@@ -237,6 +265,7 @@ def _local_classify(
         topic_confidence, topic_uncertain, topic_numeric_confidence = _topic_confidence(top, alternatives, flags)
         secondary_topics: list[str] = []
         evidence = _evidence_string(top, alternatives)
+        evidence_details = _topic_evidence_details(evidence_sources)
         if top.score <= 0:
             topic_confidence = "low"
             topic_uncertain = True
@@ -254,7 +283,14 @@ def _local_classify(
         topic_numeric_confidence = 0.35
         secondary_topics = []
         evidence = "No configured method or object rule matched this question."
+        evidence_details = _topic_evidence_details(evidence_sources)
         flags.extend(["topic_uncertain", "topic_uncertain_no_rule_match"])
+
+    if not evidence_sources["examiner_report"] and not evidence_sources["mark_scheme"] and evidence_sources["question_ocr"]:
+        flags.append("topic_ocr_only_evidence")
+        topic_uncertain = True
+    if alternatives and top.score - alternatives[0].score <= 1.5:
+        flags.append("topic_close_score")
 
     difficulty = _infer_difficulty(
         normalized,
@@ -290,6 +326,7 @@ def _local_classify(
         review_flags=sorted(set(flags)),
         topic_confidence=topic_confidence,
         topic_evidence=evidence,
+        topic_evidence_details=evidence_details,
         secondary_topics=secondary_topics,
         topic_uncertain=topic_uncertain,
         alternative_topics=[candidate.label for candidate in alternatives[:6]],
@@ -378,6 +415,94 @@ def _score_topic_candidates(text: str, config: AppConfig, allowed_families: list
                 _apply_specific_rule_boosts(candidate, text)
                 candidates.append(candidate)
     return _best_candidate_per_topic(candidates)
+
+
+def _score_topic_candidates_from_sources(
+    evidence_sources: dict[str, str],
+    config: AppConfig,
+    allowed_families: list[str],
+) -> list[TopicCandidate]:
+    source_weights = {
+        "examiner_report": 1.6,
+        "mark_scheme": 1.25,
+        "question_text": 1.0,
+        "question_ocr": 0.45,
+    }
+    direct_weights = {
+        "examiner_report": 6.0,
+        "mark_scheme": 4.0,
+        "question_text": 3.0,
+        "question_ocr": 1.0,
+    }
+    merged: dict[tuple[str, str], TopicCandidate] = {}
+    for source, text in evidence_sources.items():
+        if not text:
+            continue
+        for candidate in _score_topic_candidates(text, config, allowed_families):
+            key = (candidate.paper_family, candidate.topic)
+            target = merged.setdefault(
+                key,
+                TopicCandidate(candidate.paper_family, candidate.topic, candidate.subtopic),
+            )
+            target.score += candidate.score * source_weights.get(source, 1.0)
+            _extend_unique(target.methods, candidate.methods)
+            _extend_unique(target.objects, candidate.objects)
+            _extend_unique(target.keywords, candidate.keywords)
+            if candidate.score > 0:
+                target.boosts.append(f"{source}:{candidate.score:.1f}")
+            method_boost = _method_first_topic_boost(target, text, source)
+            if method_boost:
+                target.score += method_boost * direct_weights.get(source, 1.0)
+                target.boosts.append(f"{source}:method_first:{method_boost:.1f}")
+    for family in allowed_families:
+        for topic, subtopics in config.paper_family_taxonomy.get(family, {}).items():
+            merged.setdefault((family, topic), TopicCandidate(family, topic, subtopics[0] if subtopics else "general"))
+    return sorted(merged.values(), key=lambda item: item.score, reverse=True)
+
+
+def _extend_unique(target: list[str], values: list[str]) -> None:
+    for value in values:
+        if value not in target:
+            target.append(value)
+
+
+def _method_first_topic_boost(candidate: TopicCandidate, text: str, source: str) -> float:
+    topic = candidate.topic
+    patterns = {
+        "quadratics": [
+            r"discriminant|repeated roots|equal roots|nature of roots",
+            r"elimination leading to (?:a )?quadratic|leading to (?:a )?quadratic",
+        ],
+        "series": [r"\bAP\b|\bGP\b|arithmetic progression|geometric progression|sequence|series"],
+        "coordinate_geometry": [r"substitute (?:the )?line into (?:the )?circle|line (?:and|into) circle|coordinate geometry"],
+        "trigonometry": [r"common denominator.*trig|trig(?:onometric)? identity|use (?:a )?trig(?:onometric)? identity"],
+        "integration": [r"integrate f'?\\?'\(x\)|constant of integration|set up (?:a )?correct integral|definite integral|volume of revolution"],
+        "binomial_expansion": [r"select the required term|required term|binomial expansion|ascending powers"],
+        "functions": [r"sequence of transformations|composite function|composite.*identity|inverse function|domain|range"],
+        "differentiation": [r"differentiat|stationary point|gradient function|tangent|normal"],
+        "complex_numbers": [r"argand|complex number|modulus and argument|roots of.*complex"],
+        "vectors": [r"position vector|scalar product|vector equation|vectors?"],
+        "differential_equations": [r"differential equation|separate variables|rate of change"],
+        "kinematics": [r"constant acceleration|velocity|displacement|acceleration"],
+        "forces_and_equilibrium": [r"resolve forces|equilibrium|friction|coefficient of friction|limiting"],
+        "connected_particles": [r"connected particles|pulley|tension|string"],
+        "momentum_and_impulse": [r"momentum|impulse|collision|coefficient of restitution"],
+        "work_energy_power": [r"work energy|kinetic energy|potential energy|power"],
+        "circular_motion": [r"circular motion|centripetal"],
+        "permutations_and_combinations": [r"permutation|combination|arrangement|selection|required ways"],
+        "probability": [r"probability|conditional|independent events|tree diagram"],
+        "discrete_random_variables": [r"discrete random variable|expectation|variance|probability distribution table"],
+        "binomial_distribution": [r"binomial distribution|\bX\s*~\s*B"],
+        "poisson_distribution": [r"poisson"],
+        "normal_distribution": [r"normal distribution|standardi[sz]e|standard deviation|z value"],
+        "correlation_and_regression": [r"correlation|regression|pmcc|least squares"],
+    }
+    for pattern in patterns.get(topic, []):
+        if re.search(pattern, text, re.IGNORECASE):
+            return 1.0
+    if source == "question_ocr":
+        return 0.0
+    return 0.0
 
 
 def _best_candidate_per_topic(candidates: list[TopicCandidate]) -> list[TopicCandidate]:
@@ -544,6 +669,8 @@ def _evidence_string(top: TopicCandidate, alternatives: list[TopicCandidate]) ->
     if specific:
         return specific
     pieces = [f"matched {top.paper_family} {top.topic}/{top.subtopic}"]
+    if top.boosts:
+        pieces.append("source scores: " + ", ".join(top.boosts[:4]))
     if top.methods:
         pieces.append("method cues: " + ", ".join(_clean_pattern(pattern) for pattern in top.methods[:2]))
     if top.objects:
@@ -572,6 +699,14 @@ def _specific_evidence(top: TopicCandidate) -> str:
     if top.topic == "hypothesis_testing":
         return "uses a hypothesis test with a probability distribution"
     return ""
+
+
+def _topic_evidence_details(evidence_sources: dict[str, str]) -> dict[str, str]:
+    return {
+        key: _compact_snippet(value, limit=260)
+        for key, value in evidence_sources.items()
+        if value
+    }
 
 
 def _infer_difficulty(

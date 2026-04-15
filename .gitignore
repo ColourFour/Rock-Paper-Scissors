@@ -10,11 +10,14 @@ output/images/*
 output/json/*
 output/csv/*
 output/review/*
+output/qa/*
 output/debug/*
 output/topic_pdfs/*
+output/practice/*
 !output/images/.gitkeep
 !output/json/.gitkeep
 !output/csv/.gitkeep
 !output/review/.gitkeep
+!output/qa/.gitkeep
 !output/debug/.gitkeep
 !output/topic_pdfs/.gitkeep

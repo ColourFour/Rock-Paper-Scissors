@@ -109,6 +109,7 @@ class ClassificationResult:
     review_flags: list[str] = field(default_factory=list)
     topic_confidence: str = "low"
     topic_evidence: str = ""
+    topic_evidence_details: dict[str, str] = field(default_factory=dict)
     secondary_topics: list[str] = field(default_factory=list)
     topic_uncertain: bool = False
     alternative_topics: list[str] = field(default_factory=list)
@@ -152,10 +153,18 @@ class QuestionRecord:
     review_flags: list[str]
     confidence: float
     source_paper_code: str = ""
+    syllabus_code: str = ""
+    session: str = ""
+    year: str = ""
+    document_type: str = ""
+    component: str = ""
+    document_key: str = ""
+    metadata_source: str = ""
     crop_uncertain: bool = False
     question_crop_confidence: str = ""
     crop_debug_paths: list[str] = field(default_factory=list)
     topic_alternatives: list[str] = field(default_factory=list)
+    topic_evidence_details: dict[str, str] = field(default_factory=dict)
     question_level_paper_family: str = ""
     question_level_topic: str = ""
     question_level_subtopic: str = ""
@@ -169,6 +178,10 @@ class QuestionRecord:
     markscheme_table_header_detected: list[str] = field(default_factory=list)
     markscheme_nearby_anchors: list[str] = field(default_factory=list)
     markscheme_debug_paths: list[str] = field(default_factory=list)
+    markscheme_table_header_ok: bool = False
+    markscheme_continuation_rows_included: bool = False
+    qa_status: str = "pass"
+    qa_flags: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         question_level_paper_family = self.question_level_paper_family or self.paper_family
@@ -187,6 +200,13 @@ class QuestionRecord:
             "answer_text": self.answer_text,
             "paper_family": question_level_paper_family,
             "source_paper_code": self.source_paper_code,
+            "syllabus_code": self.syllabus_code,
+            "session": self.session,
+            "year": self.year,
+            "document_type": self.document_type,
+            "component": self.component,
+            "document_key": self.document_key,
+            "metadata_source": self.metadata_source,
             "source_paper_family": self.source_paper_family,
             "inferred_paper_family": self.inferred_paper_family,
             "paper_family_confidence": self.paper_family_confidence,
@@ -197,7 +217,9 @@ class QuestionRecord:
             "topic": question_level_topic,
             "subtopic": question_level_subtopic,
             "topic_confidence": self.topic_confidence,
+            "topic_confidence_score": _confidence_score(self.topic_confidence),
             "topic_evidence": self.topic_evidence,
+            "topic_evidence_details": self.topic_evidence_details,
             "secondary_topics": self.secondary_topics,
             "topic_uncertain": self.topic_uncertain,
             "difficulty": self.difficulty,
@@ -222,6 +244,18 @@ class QuestionRecord:
             "markscheme_table_header_detected": self.markscheme_table_header_detected,
             "markscheme_nearby_anchors": self.markscheme_nearby_anchors,
             "markscheme_debug_paths": self.markscheme_debug_paths,
+            "markscheme_table_header_ok": self.markscheme_table_header_ok,
+            "mark_scheme": {
+                "page": self.markscheme_pages[0] if self.markscheme_pages else None,
+                "table_header_ok": self.markscheme_table_header_ok,
+                "label_matched": self.markscheme_question_number,
+                "continuation_rows_included": self.markscheme_continuation_rows_included,
+                "crop_method": self.markscheme_mapping_method,
+            },
+            "qa": {
+                "status": self.qa_status,
+                "flags": self.qa_flags,
+            },
         }
 
 
@@ -275,3 +309,11 @@ class ReviewItem:
             if self.classification_restricted_by_paper_family is None
             else ("true" if self.classification_restricted_by_paper_family else "false"),
         }
+
+
+def _confidence_score(label: str) -> float:
+    return {
+        "high": 0.91,
+        "medium": 0.66,
+        "low": 0.35,
+    }.get(label, 0.0)

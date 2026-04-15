@@ -8,6 +8,8 @@ from pathlib import Path
 
 from .config import AppConfig, load_config
 from .pipeline import process_batch, process_sample
+from .practice_page import build_practice_page
+from .qa import run_qa
 from .topic_pdfs import build_topic_pdfs_from_json, build_topic_pdfs_from_records
 
 
@@ -46,6 +48,18 @@ def main(argv: list[str] | None = None) -> int:
     topic_pdfs.add_argument("--question-bank", help="Path to a question_bank.json file. Defaults to output/json/question_bank.json.")
     topic_pdfs.set_defaults(func=cmd_topic_pdfs)
 
+    qa = subparsers.add_parser("qa", help="Run deterministic QA checks against an existing question bank JSON.")
+    qa.add_argument("--config", default="config.yaml", help="Path to config.yaml.")
+    qa.add_argument("--question-bank", help="Path to a question_bank.json file. Defaults to output/json/question_bank.json.")
+    qa.add_argument("--only-failed", action="store_true", help="Write only failing records to the QA reports.")
+    qa.set_defaults(func=cmd_qa)
+
+    practice_page = subparsers.add_parser("practice-page", help="Generate a fully static student practice page.")
+    practice_page.add_argument("--config", default="config.yaml", help="Path to config.yaml.")
+    practice_page.add_argument("--question-bank", help="Path to a question_bank.json file. Defaults to output/json/question_bank.json.")
+    practice_page.add_argument("--output-dir", help="Output directory. Defaults to output/practice.")
+    practice_page.set_defaults(func=cmd_practice_page)
+
     args = parser.parse_args(argv)
     return args.func(args)
 
@@ -76,6 +90,7 @@ def cmd_preflight(args: argparse.Namespace) -> int:
         ("question_papers_dir", config.input.question_papers_dir),
         ("mark_schemes_dir", config.input.mark_schemes_dir),
         ("mappings_dir", config.input.mappings_dir),
+        ("examiner_reports_dir", config.input.examiner_reports_dir),
     ]:
         checks.append((name, directory.exists(), str(directory)))
 
@@ -123,6 +138,43 @@ def cmd_topic_pdfs(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_qa(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    question_bank = Path(args.question_bank) if args.question_bank else config.output.json_dir / config.naming.json_name
+    if not question_bank.exists():
+        print(
+            f"Question bank JSON not found: {question_bank}\n"
+            "Run `python -m exam_bank.cli process --config config.yaml` first, "
+            "or pass `--question-bank PATH` to an existing JSON export.",
+            file=sys.stderr,
+        )
+        return 1
+    output_dir = config.output.json_dir.parent / "qa"
+    result = run_qa(question_bank, output_dir, only_failed=args.only_failed)
+    _print_qa_result(result.summary, result.json_path, result.csv_path, result.review_path)
+    return 0
+
+
+def cmd_practice_page(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    question_bank = Path(args.question_bank) if args.question_bank else config.output.json_dir / config.naming.json_name
+    if not question_bank.exists():
+        print(
+            f"Question bank JSON not found: {question_bank}\n"
+            "Run `python -m exam_bank.cli process --config config.yaml` first, "
+            "or pass `--question-bank PATH` to an existing JSON export.",
+            file=sys.stderr,
+        )
+        return 1
+    output_dir = Path(args.output_dir) if args.output_dir else config.output.json_dir.parent / "practice"
+    result = build_practice_page(question_bank, output_dir)
+    print(f"Practice records: {result.usable_records}")
+    if result.skipped_records:
+        print(f"Practice skipped records: {result.skipped_records}")
+    print(f"Practice page: {result.html_path}")
+    return 0
+
+
 def _print_result(records: list[object], json_path: Path, csv_path: Path, review_path: Path) -> None:
     print(f"Processed records: {len(records)}")
     print(f"JSON: {json_path}")
@@ -138,6 +190,23 @@ def _print_topic_pdf_result(pdf_paths: list[Path], skipped_count: int, review_pa
         print(f"Topic PDF skipped records: {skipped_count}")
     if review_path:
         print(f"Topic PDF review items: {review_path}")
+
+
+def _print_qa_result(summary: dict[str, object], json_path: Path, csv_path: Path, review_path: Path) -> None:
+    status_counts = summary.get("status_counts", {})
+    if not isinstance(status_counts, dict):
+        status_counts = {}
+    print(f"QA validated records: {summary.get('validated_record_count', 0)}")
+    print(f"QA skipped P2/P6 records: {summary.get('skipped_record_count', 0)}")
+    print(
+        "QA status counts: "
+        f"pass={status_counts.get('pass', 0)}, "
+        f"warning={status_counts.get('warning', 0)}, "
+        f"fail={status_counts.get('fail', 0)}"
+    )
+    print(f"QA JSON: {json_path}")
+    print(f"QA CSV: {csv_path}")
+    print(f"QA review: {review_path}")
 
 
 if __name__ == "__main__":

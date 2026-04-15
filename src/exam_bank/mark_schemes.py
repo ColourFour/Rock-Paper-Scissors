@@ -8,6 +8,8 @@ import re
 from pathlib import Path
 
 from .config import AppConfig
+from .document_metadata import companion_candidates, parse_filename_metadata
+from .identifiers import normalize_question_id, parent_question_id
 from .models import BoundingBox, PageLayout, QuestionStart, TextBlock
 from .pdf_extract import extract_pdf_layout
 from .question_detection import parse_question_start
@@ -27,6 +29,8 @@ class MarkSchemeImageResult:
     nearby_anchors: list[str] = field(default_factory=list)
     debug_paths: list[str] = field(default_factory=list)
     review_flags: list[str] = field(default_factory=list)
+    table_header_ok: bool = False
+    continuation_rows_included: bool = False
 
 
 @dataclass(frozen=True)
@@ -55,6 +59,7 @@ class MarkSchemeCropRegion:
     page_number: int
     bbox: BoundingBox
     table_detected: bool
+    continuation_rows_included: bool = False
 
 
 def find_mark_scheme(
@@ -68,6 +73,12 @@ def find_mark_scheme(
     override = _find_mapping_override(question_pdf, mark_schemes_dir, Path(mappings_dir) if mappings_dir else None)
     if override:
         return override
+
+    metadata = parse_filename_metadata(question_pdf)
+    if metadata.canonical_key:
+        candidates = companion_candidates(metadata, mark_schemes_dir, "MS")
+        if candidates:
+            return candidates[0]
 
     for candidate_name in _auto_candidate_names(question_pdf.name):
         candidate = mark_schemes_dir / candidate_name
@@ -92,19 +103,26 @@ def extract_mark_scheme_answers(
     expected_numbers: list[str] | None = None,
 ) -> dict[str, str]:
     layouts = extract_pdf_layout(mark_scheme_pdf, config)
-    starts = _detect_mark_scheme_starts(layouts, config, expected_numbers)
-    if not starts:
-        return _fallback_regex_answers(layouts, expected_numbers)
-
+    tables = _detect_mark_scheme_tables(layouts, config)
+    anchors = _detect_table_question_anchors(layouts, tables, config, expected_numbers)
+    if not anchors:
+        return {}
     answers: dict[str, str] = {}
-    for index, start in enumerate(starts):
-        next_start = starts[index + 1] if index + 1 < len(starts) else None
-        end_page = next_start.page_number if next_start else layouts[-1].page_number
-        end_y = next_start.y0 if next_start else layouts[-1].height
-        blocks = _blocks_between(layouts, start.page_number, start.y0, end_page, end_y)
+    ordered = sorted(anchors, key=lambda item: (item.page_number, item.y0))
+    for index, anchor in enumerate(ordered):
+        next_anchor = ordered[index + 1] if index + 1 < len(ordered) else None
+        table = anchor.table
+        if table is None:
+            continue
+        end_page = next_anchor.page_number if next_anchor else anchor.page_number
+        end_y = next_anchor.y0 if next_anchor and next_anchor.page_number == anchor.page_number else table.bbox.y1
+        blocks = _blocks_between(layouts, anchor.page_number, anchor.y0, end_page, end_y)
         text = "\n".join(block.text for block in blocks).strip()
         if text:
-            answers[start.question_number] = text
+            answers[anchor.question_number] = text
+            parent = parent_question_id(anchor.question_number)
+            if parent != anchor.question_number:
+                answers[parent] = "\n".join(item for item in [answers.get(parent, ""), text] if item).strip()
     return answers
 
 
@@ -133,17 +151,18 @@ def render_mark_scheme_images(
     layouts = extract_pdf_layout(mark_scheme_pdf, config)
     tables = _detect_mark_scheme_tables(layouts, config)
     anchors = _detect_table_question_anchors(layouts, tables, config, expected_numbers)
-    starts = _anchors_to_question_starts(anchors)
-    if not anchors:
-        starts = _detect_mark_scheme_starts(layouts, config, expected_numbers)
-    if not anchors and not starts:
+    if not tables or not anchors:
         return {
             number: MarkSchemeImageResult(
                 question_number=number,
                 crop_confidence="low",
-                mapping_method="fallback_nonstandard_table",
+                mapping_method="table_row_block",
                 table_detected=False,
-                review_flags=["markscheme_image_missing", "markscheme_image_no_boundaries", "markscheme_answer_table_header_missing"],
+                review_flags=[
+                    "markscheme_image_missing",
+                    "markscheme_no_valid_answer_table",
+                    "markscheme_answer_table_header_missing",
+                ],
             )
             for number in expected_numbers
         }
@@ -155,46 +174,61 @@ def render_mark_scheme_images(
     with fitz.open(mark_scheme_pdf) as doc:
         rendered_pages = {}
         ordered_anchors = sorted(anchors, key=lambda item: (item.page_number, item.y0))
-        ordered_starts = sorted(starts, key=lambda item: (item.page_number, item.y0))
         for number in expected_numbers:
-            anchor_index = next((index for index, item in enumerate(ordered_anchors) if item.question_number == number), None)
-            start_index = next((index for index, item in enumerate(ordered_starts) if item.question_number == number), None)
+            canonical_number = normalize_question_id(number)
+            anchor_index = next(
+                (
+                    index
+                    for index, item in enumerate(ordered_anchors)
+                    if item.question_number == canonical_number
+                    or (
+                        parent_question_id(item.question_number) == canonical_number
+                        and canonical_number == parent_question_id(canonical_number)
+                    )
+                ),
+                None,
+            )
             anchor = ordered_anchors[anchor_index] if anchor_index is not None else None
-            start = ordered_starts[start_index] if start_index is not None else None
             if anchor is not None:
-                next_anchor = ordered_anchors[anchor_index + 1] if anchor_index is not None and anchor_index + 1 < len(ordered_anchors) else None
+                if canonical_number == parent_question_id(canonical_number):
+                    next_anchor = next(
+                        (
+                            item
+                            for item in ordered_anchors[anchor_index + 1 :]
+                            if parent_question_id(item.question_number) != canonical_number
+                        ),
+                        None,
+                    )
+                else:
+                    next_anchor = ordered_anchors[anchor_index + 1] if anchor_index is not None and anchor_index + 1 < len(ordered_anchors) else None
                 regions, flags = _table_regions_for_anchor(layouts, tables, anchor, next_anchor, config)
-                mapping_method = "table_by_question_number"
+                if anchor.question_number != canonical_number:
+                    flags.append("markscheme_parent_label_match")
+                mapping_method = "table_row_block"
                 table_detected = True
                 nearby_anchors = _nearby_anchor_labels(ordered_anchors, anchor)
-            elif start is not None:
-                next_start = ordered_starts[start_index + 1] if start_index is not None and start_index + 1 < len(ordered_starts) else None
-                regions, flags = _mark_scheme_regions_for_start(layouts, start, next_start, config)
-                mapping_method = "fallback_nonstandard_table"
-                table_detected = False
-                nearby_anchors = [item.question_number for item in ordered_starts[max(0, start_index - 2) : start_index + 3]]
-                flags.extend(["markscheme_table_detection_failed", "markscheme_answer_table_header_missing"])
             else:
                 output[number] = MarkSchemeImageResult(
                     question_number=number,
                     crop_confidence="low",
-                    mapping_method="fallback_nonstandard_table",
+                    mapping_method="table_row_block",
                     table_detected=bool(tables),
                     review_flags=["markscheme_image_missing", "markscheme_no_row_for_question"],
-                    nearby_anchors=[item.question_number for item in ordered_anchors[:8]] or [item.question_number for item in ordered_starts[:8]],
+                    nearby_anchors=[item.question_number for item in ordered_anchors[:8]],
                 )
                 continue
 
             if not regions:
                 output[number] = MarkSchemeImageResult(
                     question_number=number,
-                    markscheme_question_number=anchor.question_number if anchor else (start.question_number if start else ""),
+                    markscheme_question_number=anchor.question_number if anchor else "",
                     crop_confidence="low",
-                mapping_method=mapping_method,
-                table_detected=table_detected,
-                table_header_detected=anchor.table.header_detected if anchor and anchor.table else [],
-                nearby_anchors=nearby_anchors,
-                review_flags=sorted(set(flags + ["markscheme_image_missing"])),
+                    mapping_method=mapping_method,
+                    table_detected=table_detected,
+                    table_header_detected=anchor.table.header_detected if anchor and anchor.table else [],
+                    nearby_anchors=nearby_anchors,
+                    review_flags=sorted(set(flags + ["markscheme_image_missing"])),
+                    table_header_ok=bool(anchor and anchor.table and anchor.table.header_detected == ["Question", "Answer", "Marks", "Guidance"]),
                 )
                 continue
 
@@ -215,13 +249,14 @@ def render_mark_scheme_images(
             if not crops:
                 output[number] = MarkSchemeImageResult(
                     question_number=number,
-                    markscheme_question_number=anchor.question_number if anchor else (start.question_number if start else ""),
+                    markscheme_question_number=anchor.question_number if anchor else "",
                     crop_confidence="low",
-                mapping_method=mapping_method,
-                table_detected=table_detected,
-                table_header_detected=anchor.table.header_detected if anchor and anchor.table else [],
-                nearby_anchors=nearby_anchors,
-                review_flags=sorted(set(flags + ["markscheme_image_missing"])),
+                    mapping_method=mapping_method,
+                    table_detected=table_detected,
+                    table_header_detected=anchor.table.header_detected if anchor and anchor.table else [],
+                    nearby_anchors=nearby_anchors,
+                    review_flags=sorted(set(flags + ["markscheme_image_missing"])),
+                    table_header_ok=bool(anchor and anchor.table and anchor.table.header_detected == ["Question", "Answer", "Marks", "Guidance"]),
                 )
                 continue
 
@@ -233,21 +268,21 @@ def render_mark_scheme_images(
             output_path.parent.mkdir(parents=True, exist_ok=True)
             _stitch_images(crops, config.detection.stitch_gap_px).save(output_path)
             confidence = _mark_scheme_crop_confidence(regions, layouts, flags)
-            if mapping_method != "table_by_question_number" and confidence == "high":
-                confidence = "medium"
             output[number] = MarkSchemeImageResult(
                 question_number=number,
                 image_path=output_path,
                 page_numbers=[region.page_number for region in regions],
-                markscheme_question_number=anchor.question_number if anchor else (start.question_number if start else ""),
+                markscheme_question_number=anchor.question_number if anchor else "",
                 crop_confidence=confidence,
                 mapping_method=mapping_method,
                 table_detected=table_detected,
                 table_header_detected=anchor.table.header_detected if anchor and anchor.table else [],
-                detected_anchor_pages=[anchor.page_number] if anchor else ([start.page_number] if start else []),
+                detected_anchor_pages=[anchor.page_number] if anchor else [],
                 nearby_anchors=nearby_anchors,
                 debug_paths=debug_paths,
                 review_flags=sorted(set(flags)),
+                table_header_ok=bool(anchor and anchor.table and anchor.table.header_detected == ["Question", "Answer", "Marks", "Guidance"]),
+                continuation_rows_included=any(region.continuation_rows_included for region in regions),
             )
 
     found = set(output)
@@ -256,7 +291,7 @@ def render_mark_scheme_images(
             output[number] = MarkSchemeImageResult(
                 question_number=number,
                 crop_confidence="low",
-                mapping_method="fallback_nonstandard_table",
+                mapping_method="table_row_block",
                 table_detected=bool(tables),
                 review_flags=["markscheme_image_missing"],
             )
@@ -387,6 +422,8 @@ def _detect_mark_scheme_starts(
 def _detect_mark_scheme_tables(layouts: list[PageLayout], config: AppConfig) -> dict[int, MarkSchemeTable]:
     tables: dict[int, MarkSchemeTable] = {}
     for layout in layouts:
+        if layout.page_number < 6:
+            continue
         header_blocks = _mark_scheme_header_blocks(layout)
         header_detected = _header_terms(header_blocks)
         if header_detected != ["Question", "Answer", "Marks", "Guidance"]:
@@ -490,7 +527,8 @@ def _detect_table_question_anchors(
     config: AppConfig,
     expected_numbers: list[str] | None,
 ) -> list[MarkSchemeAnchor]:
-    expected = set(expected_numbers or [])
+    expected = {normalize_question_id(number) for number in (expected_numbers or [])}
+    expected_parents = {parent_question_id(number) for number in expected}
     anchors: list[MarkSchemeAnchor] = []
     seen: set[tuple[str, int, int]] = set()
     for layout in layouts:
@@ -505,7 +543,7 @@ def _detect_table_question_anchors(
                 continue
             if block.bbox.x0 > q_col_right:
                 continue
-            number = _parse_mark_scheme_question_cell(block.text, expected)
+            number = _parse_mark_scheme_question_cell(block.text, expected, expected_parents)
             if not number:
                 continue
             key = (number, layout.page_number, round(block.bbox.y0))
@@ -526,21 +564,16 @@ def _detect_table_question_anchors(
     return sorted(anchors, key=lambda item: (item.page_number, item.y0, item.x0))
 
 
-def _parse_mark_scheme_question_cell(text: str, expected: set[str]) -> str | None:
+def _parse_mark_scheme_question_cell(text: str, expected: set[str], expected_parents: set[str] | None = None) -> str | None:
     cleaned = _clean_cell_text(text)
     if not cleaned:
         return None
-    candidates = re.findall(r"\d{1,2}", cleaned)
-    if not candidates:
-        return None
     if re.search(r"9709|page|mark|answer|guidance|scheme|paper", cleaned, re.IGNORECASE):
         return None
-    if len(candidates) > 1 and cleaned not in set(candidates):
+    number = normalize_question_id(cleaned)
+    if not re.fullmatch(r"\d{1,2}(?:\([a-h]\))?(?:\((?:i{1,3}|iv|v|vi{0,3}|ix|x)\))?", number):
         return None
-    number = candidates[0].lstrip("0") or "0"
-    if expected and number not in expected:
-        return None
-    if not re.fullmatch(r"\d{1,2}(?:\s*\([a-zivx]+\))*", cleaned):
+    if expected and number not in expected and parent_question_id(number) not in expected and number not in (expected_parents or set()):
         return None
     return number
 
@@ -615,13 +648,39 @@ def _table_regions_for_anchor(
         if box.y1 <= box.y0 + 4:
             flags.append("markscheme_image_uncertain")
             continue
-        regions.append(MarkSchemeCropRegion(layout.page_number, box, table_detected=table.confidence != "low"))
+        continuation_rows_included = _has_continuation_rows(layout, table, anchor, next_anchor, box)
+        regions.append(
+            MarkSchemeCropRegion(
+                layout.page_number,
+                box,
+                table_detected=table.confidence != "low",
+                continuation_rows_included=continuation_rows_included,
+            )
+        )
 
     if len(regions) > 1:
         flags.append("markscheme_image_stitched")
     if anchor.table.confidence != "high":
         flags.append("markscheme_image_uncertain")
     return regions, flags
+
+
+def _has_continuation_rows(
+    layout: PageLayout,
+    table: MarkSchemeTable,
+    anchor: MarkSchemeAnchor,
+    next_anchor: MarkSchemeAnchor | None,
+    crop_box: BoundingBox,
+) -> bool:
+    bottom = next_anchor.y0 if next_anchor and next_anchor.page_number == layout.page_number else crop_box.y1
+    for block in layout.blocks:
+        if block.bbox.y0 <= anchor.y1 + 3 or block.bbox.y0 >= bottom:
+            continue
+        if block.bbox.x0 <= table.question_col_right:
+            continue
+        if crop_box.x0 - 5 <= block.bbox.x0 <= crop_box.x1 + 5:
+            return True
+    return False
 
 
 def _tighten_table_bottom_from_content(

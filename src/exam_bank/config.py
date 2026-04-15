@@ -859,6 +859,7 @@ class InputConfig:
     question_papers_dir: Path = Path("input/question_papers")
     mark_schemes_dir: Path = Path("input/mark_schemes")
     mappings_dir: Path = Path("input/mappings")
+    examiner_reports_dir: Path = Path("input/examiner_reports")
 
 
 @dataclass
