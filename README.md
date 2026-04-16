@@ -33,6 +33,7 @@ output/
   review/
   qa/
   practice/
+  manual_review/
   topic_pdfs/
   debug/
 ```
@@ -85,6 +86,7 @@ output/csv/
 output/review/
 output/qa/
 output/practice/
+output/manual_review/
 output/topic_pdfs/
 output/debug/   # only populated when debug.enabled is true
 ```
@@ -117,13 +119,10 @@ You can also enable this permanently in `config.yaml` with:
 ```yaml
 topic_pdfs:
   enable_topic_pdfs: true
-  include_mark_scheme_link: true
+  embed_mark_schemes: true
 ```
 
-When `include_mark_scheme_link` is enabled, each question in a topic PDF includes an
-`Open mark scheme image` link plus the visible relative image path as a fallback.
-Keep `output/topic_pdfs/` and the image folders together so links like
-`../images/...png` or `../markschemes/...png` continue to resolve when shared.
+When `embed_mark_schemes` is enabled, each topic PDF is self-contained. The question page embeds the question PNG, then links internally to a dedicated mark scheme page with the mark scheme PNG embedded directly in the same PDF. No adjacent image folder is required when you share the PDF.
 
 The pipeline auto-pairs files like:
 
@@ -176,7 +175,7 @@ Medium  -> difficulty: average
 Hard    -> difficulty: difficult
 ```
 
-Questions are sorted inside each section by `subtopic`, then `paper_name`, then `question_number`. Each entry uses the existing cropped PNG and a small caption with paper name, question number, subtopic, and marks when available. Records with missing topic, difficulty, or image paths are skipped and logged in `output/review/review_items.csv`.
+Questions are sorted inside each section by `subtopic`, then `paper_name`, then `question_number`. Each entry uses the existing cropped PNG and a small caption with paper name, question number, subtopic, and marks when available. When a mark scheme image exists, it is embedded on the next page and the question page includes an internal `Go to mark scheme` link. The mark scheme page includes `Back to question`. If the mark scheme image is missing or unreadable, the question page says `Mark scheme image unavailable` instead of creating a broken link. Records with missing topic, difficulty, or question image paths are skipped and logged in `output/review/review_items.csv`.
 
 ## QA Review
 
@@ -283,9 +282,77 @@ mark scheme page number
 qa status / warnings
 ```
 
-The page lets a student choose a paper family and topic, get a random matching question image, and reveal the mapped mark scheme image.
+The page lets a student choose a paper family and topic, get a matching question image, and reveal the mapped mark scheme image. Within the active paper/topic set, questions are tracked as seen when they are displayed. `Give me a question` draws from unseen questions first, so a question will not repeat until every eligible question in that set has been seen or progress is reset.
+
+Progress is filter-aware and saved in browser `localStorage`. The page shows `Seen X / Total` for the current paper/topic, and `Reset progress` clears only the current paper/topic set so those questions can appear again.
 
 The publishable copy in `practice/` also copies the referenced question and mark scheme images into `practice/assets/`, so the page works from GitHub Pages instead of depending on ignored `output/` files.
+
+## Manual Review Tool
+
+Use the local manual review tool when you want to curate topic, difficulty, usability, and crop status before sharing with students.
+
+Generate it from the current question bank:
+
+```bash
+python -m exam_bank.cli manual-review-page --config config.yaml
+```
+
+This writes:
+
+```text
+output/manual_review/index.html
+```
+
+Start a simple local server from the repository root:
+
+```bash
+python3 -m http.server 8001
+```
+
+Then open:
+
+```text
+http://localhost:8001/output/manual_review/index.html
+```
+
+The tool shows one question at a time with its question screenshot and mark scheme screenshot. The paper dropdown uses the actual generated paper/session/component where available, so progress is tracked through a specific paper rather than only through P1/P3/P4/P5. You can jump to a question, move next/previous, show only unreviewed items, show unusable items, show crop issues, show only items with question images, or show missing mark schemes.
+
+For each record you can set:
+
+```text
+manual_topic
+manual_difficulty: easy / medium / hard
+usable
+crop_status: ok / needs_fix / bad
+notes
+```
+
+Topic choices come from the configured valid topic list for the selected paper. Edits are saved immediately in browser `localStorage` under `examBankManualReview:v1`, so refreshing the page does not lose the work on that browser. The page also has `Export review JSON` and `Import review JSON` so you can move review data between sessions or machines.
+
+When you are done reviewing, export the JSON from the page and merge it into a reviewed question bank:
+
+```bash
+python -m exam_bank.cli apply-manual-review \
+  --config config.yaml \
+  --review-json path/to/manual_review_2026-04-16.json \
+  --output-json output/json/question_bank_reviewed.json
+```
+
+The merge applies manual values in a pipeline-friendly way:
+
+- `manual_topic` overrides `topic` and `question_level_topic`.
+- `manual_difficulty` is stored as entered; for existing pipeline difficulty labels, `medium` maps to `average` and `hard` maps to `difficult`.
+- `usable: false` excludes the record from student-facing practice.
+- `crop_status: bad` excludes the record from student-facing practice.
+- `notes` are stored as `manual_notes`.
+
+Build student outputs from the reviewed JSON:
+
+```bash
+python -m exam_bank.cli practice-page --config config.yaml --question-bank output/json/question_bank_reviewed.json
+python -m exam_bank.cli topic-pdfs --config config.yaml --question-bank output/json/question_bank_reviewed.json
+```
 
 ### GitHub Pages Sharing
 
@@ -518,7 +585,7 @@ Topic PDF layout can be tuned in `config.yaml`:
 topic_pdfs:
   enable_topic_pdfs: false
   topic_pdf_output_dir: output/topic_pdfs
-  include_mark_scheme_link: true
+  embed_mark_schemes: true
   page_size: A4
   margin: 42
   image_max_width: 500
@@ -550,6 +617,9 @@ practice_page:
       question_image: question_image
       markscheme_image: markscheme_image
       report_text: report_text
+
+manual_review:
+  output_dir: output/manual_review
 ```
 
 ## Optional OpenAI Classification
@@ -586,6 +656,8 @@ The pipeline writes `output/review/review_items.csv` for anything uncertain, inc
 - header/footer contamination
 - answer-space-heavy regions
 - uncertain crop boxes
+- text/figure overlap trimming for diagram questions
+- duplicate visual-region detection for repeated graph or diagram sources
 
 This file is designed for manual correction and later improvement of the heuristics.
 
@@ -598,7 +670,7 @@ Topic classification debugging is written to `output/review/<paper_name>_topic_d
 - Scanned PDFs can work through OCR, but maths notation may be imperfect.
 - Very unusual page layouts may need `question_start_max_x`, margins, or OCR thresholds adjusted.
 - Mark schemes with complex tables may attach broad answer sections rather than precise subpart answers.
-- Prompt crops are based on detected text/mark boxes plus nearby non-answer graphics. Very unusual diagrams or tables may still need review; uncertain crops are marked with `crop_uncertain`.
+- Prompt crops are based on separated text boxes and nearby non-answer graphics. For diagram questions, the renderer trims text crops so they do not overlap figure regions, then embeds the figure exactly once as its own crop. Very unusual diagrams or tables may still need review; uncertain crops are marked with `crop_uncertain`.
 - Topic classification is intentionally conservative and flags uncertain items rather than hiding them.
 - Topic PDF export uses the already-cropped PNGs. If an image path is stale or unreadable, that record is skipped and logged instead of stopping the pack build.
 

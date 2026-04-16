@@ -12,6 +12,7 @@ from .image_limits import cap_image_pixels, render_pdf_area
 from .identifiers import normalize_question_id, parent_question_id
 from .models import BoundingBox, PageLayout, QuestionStart, TextBlock
 from .mupdf_tools import quiet_mupdf
+from .pdf_extract import _visual_box_from_rect
 from .pdf_extract import extract_pdf_layout
 from .question_detection import parse_question_start
 
@@ -557,11 +558,12 @@ def _extract_mark_scheme_words(mark_scheme_pdf: Path) -> dict[int, list[MarkSche
             for raw_word in page.get_text("words"):
                 x0, y0, x1, y1, text, *_ = raw_word
                 if str(text).strip():
+                    bbox = _visual_box_from_rect(page, (x0, y0, x1, y1))
                     words.append(
                         MarkSchemeWord(
                             page_number=page_number,
                             text=str(text),
-                            bbox=BoundingBox(float(x0), float(y0), float(x1), float(y1)),
+                            bbox=bbox,
                         )
                     )
             words_by_page[page_number] = words
@@ -807,7 +809,37 @@ def _detect_table_question_anchors(
                     table=table,
                 )
             )
-    return sorted(anchors, key=lambda item: (item.page_number, item.y0, item.x0))
+    ordered = sorted(anchors, key=lambda item: (item.page_number, item.y0, item.x0))
+    return _filter_out_of_sequence_mark_scheme_anchors(ordered)
+
+
+def _filter_out_of_sequence_mark_scheme_anchors(anchors: list[MarkSchemeAnchor]) -> list[MarkSchemeAnchor]:
+    accepted: list[MarkSchemeAnchor] = []
+    highest_parent = 0
+    for index, anchor in enumerate(anchors):
+        parent = _anchor_parent_number(anchor)
+        if parent is None:
+            continue
+        if not accepted:
+            accepted.append(anchor)
+            highest_parent = parent
+            continue
+        if parent < highest_parent:
+            continue
+        if parent > highest_parent + 1 and _future_parent_exists(anchors, index, highest_parent + 1):
+            continue
+        accepted.append(anchor)
+        highest_parent = max(highest_parent, parent)
+    return accepted
+
+
+def _anchor_parent_number(anchor: MarkSchemeAnchor) -> int | None:
+    match = re.match(r"\d{1,2}", parent_question_id(anchor.question_number))
+    return int(match.group(0)) if match else None
+
+
+def _future_parent_exists(anchors: list[MarkSchemeAnchor], after_index: int, parent_number: int) -> bool:
+    return any(_anchor_parent_number(anchor) == parent_number for anchor in anchors[after_index + 1 :])
 
 
 def _detect_table_question_anchors_from_words(
@@ -864,9 +896,8 @@ def _leading_question_label_text(words: list[MarkSchemeWord]) -> str:
     ordered = sorted(words, key=lambda item: item.bbox.x0)
     candidates = [" ".join(word.text for word in ordered[:count]) for count in range(1, min(3, len(ordered)) + 1)]
     for candidate in candidates:
-        cleaned = _clean_question_label_candidate(candidate)
-        if re.fullmatch(r"\d{1,2}(?:\([a-h]\))?(?:\((?:i{1,3}|iv|v|vi{0,3}|ix|x)\))?", cleaned):
-            return cleaned
+        if _is_plausible_mark_scheme_label(candidate):
+            return _clean_question_label_candidate(candidate)
     return _clean_question_label_candidate(ordered[0].text)
 
 
@@ -883,12 +914,20 @@ def _parse_mark_scheme_question_cell(text: str, expected: set[str], expected_par
         return None
     if re.search(r"9709|page|mark|answer|guidance|scheme|paper", cleaned, re.IGNORECASE):
         return None
-    number = normalize_question_id(cleaned)
-    if not re.fullmatch(r"\d{1,2}(?:\([a-h]\))?(?:\((?:i{1,3}|iv|v|vi{0,3}|ix|x)\))?", number):
+    if not _is_plausible_mark_scheme_label(cleaned):
         return None
+    number = normalize_question_id(_clean_question_label_candidate(cleaned))
     if expected and number not in expected and parent_question_id(number) not in expected and number not in (expected_parents or set()):
         return None
     return number
+
+
+def _is_plausible_mark_scheme_label(text: str) -> bool:
+    cleaned = _clean_cell_text(text)
+    if not cleaned or cleaned.startswith("("):
+        return False
+    label = _clean_question_label_candidate(cleaned)
+    return bool(re.fullmatch(r"\d{1,2}(?:[a-h]|\([a-h]\))?(?:\((?:i{1,3}|iv|v|vi{0,3}|ix|x)\))?", label, re.IGNORECASE))
 
 
 def _anchors_to_question_starts(anchors: list[MarkSchemeAnchor]) -> list[QuestionStart]:
@@ -1135,8 +1174,8 @@ def _mark_total_for_question_block(
     words_by_page: dict[int, list[MarkSchemeWord]] | None = None,
 ) -> int | None:
     if words_by_page:
-        segment_criteria_totals = [0]
-        segment_standalone_totals: list[list[int]] = [[]]
+        criteria_total = 0
+        standalone_totals: list[int] = []
         found = False
         for layout in layouts:
             if layout.page_number < anchor.page_number:
@@ -1168,8 +1207,6 @@ def _mark_total_for_question_block(
             for row in rows:
                 full_text = " ".join(word.text for word in row)
                 if re.search(r"\balternative\s+method\b", full_text, re.IGNORECASE):
-                    segment_criteria_totals.append(0)
-                    segment_standalone_totals.append([])
                     continue
                 marks_cell = " ".join(
                     word.text
@@ -1179,15 +1216,13 @@ def _mark_total_for_question_block(
                 marks = _marks_from_marks_cell(marks_cell)
                 if marks:
                     if _is_standalone_total_row(row, table, marks_cell):
-                        segment_standalone_totals[-1].append(sum(marks))
+                        standalone_totals.append(sum(marks))
                     else:
-                        segment_criteria_totals[-1] += sum(marks)
+                        criteria_total += sum(marks)
                     found = True
-        payable_totals = [
-            sum(standalone) if standalone else criteria
-            for criteria, standalone in zip(segment_criteria_totals, segment_standalone_totals)
-        ]
-        return max(payable_totals) if found else None
+        if not found:
+            return None
+        return sum(standalone_totals) if standalone_totals else criteria_total
 
     total = 0
     found = False

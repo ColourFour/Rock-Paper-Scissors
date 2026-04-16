@@ -929,7 +929,7 @@ class ClassificationConfig:
 class TopicPDFConfig:
     enable_topic_pdfs: bool = False
     topic_pdf_output_dir: Path = Path("output/topic_pdfs")
-    include_mark_scheme_link: bool = True
+    embed_mark_schemes: bool = True
     page_size: str = "A4"
     margin: float = 42
     image_max_width: float = 500
@@ -966,6 +966,11 @@ class PracticePageConfig:
     publish_asset_dir: str = "assets"
     github_pages_url: str = ""
     bug_report: BugReportConfig = field(default_factory=BugReportConfig)
+
+
+@dataclass
+class ManualReviewConfig:
+    output_dir: Path = Path("output/manual_review")
 
 
 @dataclass
@@ -1010,6 +1015,7 @@ class AppConfig:
     classification: ClassificationConfig = field(default_factory=ClassificationConfig)
     topic_pdfs: TopicPDFConfig = field(default_factory=TopicPDFConfig)
     practice_page: PracticePageConfig = field(default_factory=PracticePageConfig)
+    manual_review: ManualReviewConfig = field(default_factory=ManualReviewConfig)
     debug: DebugConfig = field(default_factory=DebugConfig)
 
     def ensure_output_dirs(self) -> None:
@@ -1024,6 +1030,7 @@ class AppConfig:
             self.output.debug_dir.mkdir(parents=True, exist_ok=True)
         if self.topic_pdfs.enable_topic_pdfs:
             self.topic_pdfs.topic_pdf_output_dir.mkdir(parents=True, exist_ok=True)
+        self.manual_review.output_dir.mkdir(parents=True, exist_ok=True)
 
 
 def load_config(path: str | Path | None = None) -> AppConfig:
@@ -1136,7 +1143,7 @@ def _validate_hint_groups(hints: Any, location: str) -> None:
 
 def _apply_mapping(config: AppConfig, raw: dict[str, Any]) -> None:
     for key, value in raw.items():
-        if key in {"input", "output", "detection", "ocr", "naming", "classification", "topic_pdfs", "practice_page", "debug"}:
+        if key in {"input", "output", "detection", "ocr", "naming", "classification", "topic_pdfs", "practice_page", "manual_review", "debug"}:
             target = getattr(config, key)
             if not isinstance(value, dict):
                 raise ValueError(f"Config section `{key}` must be a mapping.")

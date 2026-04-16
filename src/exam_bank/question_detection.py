@@ -107,7 +107,7 @@ def detect_question_starts(layouts: list[PageLayout], config: AppConfig, source_
     starts: list[QuestionStart] = []
     seen_numbers: set[str] = set()
     last_number = 0
-    for candidate in raw_starts:
+    for candidate_index, candidate in enumerate(raw_starts):
         number = int(candidate.question_number)
         if candidate.question_number in seen_numbers:
             continue
@@ -120,11 +120,17 @@ def detect_question_starts(layouts: list[PageLayout], config: AppConfig, source_
             last_number = number
             continue
         if number > last_number:
+            if number > last_number + 1 and _future_candidate_exists(raw_starts, candidate_index, str(last_number + 1)):
+                continue
             starts.append(candidate)
             seen_numbers.add(candidate.question_number)
             last_number = number
 
     return starts
+
+
+def _future_candidate_exists(candidates: list[QuestionStart], after_index: int, question_number: str) -> bool:
+    return any(candidate.question_number == question_number for candidate in candidates[after_index + 1 :])
 
 
 def detect_question_anchor_candidates(layouts: list[PageLayout], config: AppConfig) -> list[QuestionStart]:
@@ -257,9 +263,9 @@ def extract_text_from_blocks(blocks: list[TextBlock]) -> str:
     """Extract local region text in coordinate order, never raw page-stream order."""
 
     return "\n".join(
-        block.text.strip()
+        _clean_text_line(block.text)
         for block in sorted(blocks, key=lambda item: (item.page_number, item.bbox.y0, item.bbox.x0))
-        if block.text.strip()
+        if _clean_text_line(block.text)
     ).strip()
 
 
@@ -515,7 +521,13 @@ def _is_margin_furniture_text(block: TextBlock, page: PageLayout, config: AppCon
 
 def _is_control_artifact_text(text: str) -> bool:
     control_count = sum(1 for char in text if ord(char) < 32 and char not in "\n\t\r")
-    return control_count >= 2 or (control_count >= 1 and len(text.strip()) <= 6)
+    if control_count == 0:
+        return False
+    cleaned = _strip_control_chars(text).strip()
+    visible_count = sum(1 for char in cleaned if not char.isspace())
+    if visible_count <= 3:
+        return True
+    return control_count >= max(4, visible_count)
 
 
 def _answer_artifact_count(
@@ -638,4 +650,8 @@ def _is_in_answer_rule_band(box: BoundingBox, bands: list[float]) -> bool:
 
 
 def _clean_text_line(text: str) -> str:
-    return " ".join(text.replace("\u00a0", " ").split())
+    return " ".join(_strip_control_chars(text).replace("\u00a0", " ").split())
+
+
+def _strip_control_chars(text: str) -> str:
+    return "".join(char if ord(char) >= 32 or char in "\n\t\r" else " " for char in text)

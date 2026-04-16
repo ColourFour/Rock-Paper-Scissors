@@ -254,6 +254,7 @@ def test_qa_surfaces_question_crop_artifact_flags(tmp_path: Path) -> None:
                         "side_panel_excluded",
                         "barcode_excluded",
                         "scan_edge_excluded",
+                        "text_figure_overlap_trimmed",
                     ],
                 }
             ]
@@ -264,6 +265,7 @@ def test_qa_surfaces_question_crop_artifact_flags(tmp_path: Path) -> None:
     result = run_qa(question_bank, tmp_path / "qa")
     flags = set(result.records[0]["qa_flags"])
 
-    assert result.records[0]["qa_status"] == "pass"
-    assert not flags
+    assert result.records[0]["qa_status"] == "warning"
     assert any("crop cleanup applied" in note for note in result.records[0]["qa_notes"])
+    assert "duplicate_visual_regions_detected" in flags
+    assert "question_text_figure_overlap_trimmed" in flags

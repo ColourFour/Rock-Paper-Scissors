@@ -4,7 +4,6 @@ from collections import defaultdict
 from dataclasses import dataclass
 import json
 import logging
-import os
 from pathlib import Path
 import re
 from typing import Any, Iterable, Mapping
@@ -85,9 +84,9 @@ def build_topic_pdfs(records: list[Mapping[str, Any]], config: AppConfig) -> Top
             pdf_paths.append(pdf_path)
 
     review_path = append_review_items(review_items, config) if review_items else None
-    if config.topic_pdfs.include_mark_scheme_link:
+    if config.topic_pdfs.embed_mark_schemes:
         LOGGER.info(
-            "Topic PDF mark scheme links: added=%s missing_path=%s",
+            "Topic PDF embedded mark schemes: embedded=%s missing_or_unreadable=%s",
             mark_scheme_link_count,
             missing_mark_scheme_link_count,
         )
@@ -104,6 +103,9 @@ def _valid_questions(records: list[Mapping[str, Any]]) -> tuple[list[TopicPDFQue
     valid: list[TopicPDFQuestion] = []
     review_items: list[ReviewItem] = []
     for record in records:
+        if not _student_usable(record):
+            review_items.append(_review_item(record, "topic_pdf_manual_excluded"))
+            continue
         topic = str(record.get("topic") or record.get("question_level_topic") or "").strip()
         difficulty = str(record.get("difficulty") or "").strip().lower()
         screenshot_raw = str(record.get("question_image") or record.get("screenshot_path") or "").strip()
@@ -145,6 +147,16 @@ def _valid_questions(records: list[Mapping[str, Any]]) -> tuple[list[TopicPDFQue
     return valid, review_items
 
 
+def _student_usable(record: Mapping[str, Any]) -> bool:
+    if record.get("student_usable") is False:
+        return False
+    if record.get("usable") is False:
+        return False
+    if str(record.get("crop_status") or "").strip().lower() == "bad":
+        return False
+    return True
+
+
 def _group_by_topic(questions: list[TopicPDFQuestion]) -> dict[str, list[TopicPDFQuestion]]:
     grouped: dict[str, list[TopicPDFQuestion]] = defaultdict(list)
     for question in questions:
@@ -164,9 +176,49 @@ def _write_topic_pdf(
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4, letter
         from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-        from reportlab.platypus import Image, KeepTogether, Paragraph, SimpleDocTemplate, Spacer
+        from reportlab.pdfbase.pdfmetrics import stringWidth
+        from reportlab.platypus import Flowable, Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer
     except ImportError as exc:
         raise RuntimeError("ReportLab and Pillow are required for topic PDF exports. Run `pip install -r requirements.txt`.") from exc
+
+    class Bookmark(Flowable):
+        def __init__(self, name: str) -> None:
+            super().__init__()
+            self.name = name
+
+        def wrap(self, availWidth: float, availHeight: float) -> tuple[float, float]:
+            return (0, 0)
+
+        def draw(self) -> None:
+            self.canv.bookmarkPage(self.name)
+
+    class InternalLink(Flowable):
+        def __init__(self, text: str, destination: str, style: ParagraphStyle) -> None:
+            super().__init__()
+            self.text = text
+            self.destination = destination
+            self.style = style
+            self.width = 0
+            self.height = style.leading
+
+        def wrap(self, availWidth: float, availHeight: float) -> tuple[float, float]:
+            self.width = min(availWidth, stringWidth(self.text, self.style.fontName, self.style.fontSize) + 2)
+            self.height = self.style.leading
+            return (self.width, self.height)
+
+        def draw(self) -> None:
+            color = self.style.textColor or colors.HexColor("#1F3A5F")
+            self.canv.setFillColor(color)
+            self.canv.setFont(self.style.fontName, self.style.fontSize)
+            self.canv.drawString(0, 1, self.text)
+            self.canv.line(0, 0, self.width, 0)
+            self.canv.linkRect(
+                "",
+                self.destination,
+                Rect=(0, -2, self.width, self.height),
+                relative=1,
+                thickness=0,
+            )
 
     page_size = A4 if config.topic_pdfs.page_size.upper() == "A4" else letter
     margin = config.topic_pdfs.margin
@@ -211,7 +263,7 @@ def _write_topic_pdf(
         leading=config.topic_pdfs.caption_font_size + 3,
         textColor=colors.HexColor("#1F3A5F"),
         spaceBefore=3,
-        spaceAfter=1,
+        spaceAfter=5,
     )
     path_style = ParagraphStyle(
         "MarkSchemePath",
@@ -224,7 +276,7 @@ def _write_topic_pdf(
 
     story: list[Any] = [Paragraph(_topic_title(topic), title_style)]
     usable_width = min(doc.width, config.topic_pdfs.image_max_width)
-    usable_height = max(72, doc.height - 90)
+    usable_height = max(72, doc.height - 120)
     included = 0
     mark_scheme_link_count = 0
     missing_mark_scheme_link_count = 0
@@ -233,7 +285,6 @@ def _write_topic_pdf(
         section_questions = _sorted_questions(question for question in questions if question.difficulty == difficulty)
         if not section_questions:
             continue
-        story.append(Paragraph(DIFFICULTY_SECTIONS[difficulty], section_style))
         for question in section_questions:
             try:
                 with PILImage.open(question.screenshot_path) as image:
@@ -248,32 +299,53 @@ def _write_topic_pdf(
             draw_width = width_px * scale
             draw_height = height_px * scale
             caption = _caption(question)
-            elements: list[Any] = [
+            question_anchor = _pdf_anchor_name("question", topic, difficulty, question, included)
+            mark_scheme_anchor = _pdf_anchor_name("markscheme", topic, difficulty, question, included)
+            if included:
+                story.append(PageBreak())
+            story.extend(
+                [
+                    Bookmark(question_anchor),
+                    Paragraph(DIFFICULTY_SECTIONS[difficulty], section_style),
+                ]
+            )
+            story.extend([
                 Paragraph(caption, caption_style),
                 Image(str(question.screenshot_path), width=draw_width, height=draw_height),
-            ]
-            if config.topic_pdfs.include_mark_scheme_link:
-                link_target = _mark_scheme_link_target(question, pdf_path.parent)
-                if link_target:
-                    elements.extend(
+            ])
+            if config.topic_pdfs.embed_mark_schemes:
+                mark_scheme_size = _image_size(question.markscheme_image_path, PILImage) if question.markscheme_image_path else None
+                if mark_scheme_size:
+                    story.extend(
                         [
-                            Paragraph(
-                                f'<link href="{_escape_xml_attr(link_target)}"><u>Open mark scheme image</u></link>',
-                                link_style,
+                            Spacer(1, 8),
+                            InternalLink("Go to mark scheme", mark_scheme_anchor, link_style),
+                        ]
+                    )
+                    story.append(PageBreak())
+                    mark_width_px, mark_height_px = mark_scheme_size
+                    mark_scale = min(doc.width / mark_width_px, max(72, doc.height - 96) / mark_height_px, 1.0)
+                    story.extend(
+                        [
+                            Bookmark(mark_scheme_anchor),
+                            Paragraph(f"Mark scheme | {caption}", caption_style),
+                            InternalLink("Back to question", question_anchor, link_style),
+                            Spacer(1, 8),
+                            Image(
+                                str(question.markscheme_image_path),
+                                width=mark_width_px * mark_scale,
+                                height=mark_height_px * mark_scale,
                             ),
-                            Paragraph(f"Mark scheme image: {_escape_xml(link_target)}", path_style),
+                            Spacer(1, 12),
                         ]
                     )
                     mark_scheme_link_count += 1
                 else:
-                    elements.append(Paragraph("Mark scheme image: not available", path_style))
+                    story.append(Paragraph("Mark scheme image unavailable", path_style))
                     missing_mark_scheme_link_count += 1
-            elements.append(Spacer(1, 12))
-            story.append(
-                KeepTogether(
-                    elements
-                )
-            )
+                    if question.markscheme_image_raw:
+                        review_items.append(_review_item_from_question(question, "topic_pdf_bad_markscheme_image"))
+            story.append(Spacer(1, 12))
             included += 1
 
     if included == 0:
@@ -347,7 +419,9 @@ def _review_message(issue_type: str) -> str:
         "topic_pdf_missing_image": "Topic PDF export skipped this record because the question image path was missing or unreadable.",
         "topic_pdf_missing_topic": "Topic PDF export skipped this record because the topic label was missing.",
         "topic_pdf_missing_difficulty": "Topic PDF export skipped this record because the difficulty label was missing or unsupported.",
+        "topic_pdf_manual_excluded": "Topic PDF export skipped this record because manual review marked it unusable or the crop as bad.",
         "topic_pdf_bad_image": "Topic PDF export skipped this record because the image could not be opened.",
+        "topic_pdf_bad_markscheme_image": "Topic PDF export embedded the question but could not open the mark scheme image.",
     }
     return messages.get(issue_type, "Topic PDF export skipped this record.")
 
@@ -359,13 +433,31 @@ def _resolve_path(raw_path: str) -> Path:
     return Path.cwd() / path
 
 
-def _mark_scheme_link_target(question: TopicPDFQuestion, pdf_dir: Path) -> str:
-    if not question.markscheme_image_raw or question.markscheme_image_path is None:
-        return ""
+def _image_size(path: Path | None, pil_image_module: Any) -> tuple[int, int] | None:
+    if path is None or not path.exists():
+        return None
     try:
-        return Path(os.path.relpath(question.markscheme_image_path, start=pdf_dir)).as_posix()
-    except ValueError:
-        return question.markscheme_image_path.as_uri() if question.markscheme_image_path.is_absolute() else question.markscheme_image_raw
+        with pil_image_module.open(path) as image:
+            width_px, height_px = image.size
+    except Exception:
+        return None
+    if width_px <= 0 or height_px <= 0:
+        return None
+    return (width_px, height_px)
+
+
+def _pdf_anchor_name(prefix: str, topic: str, difficulty: str, question: TopicPDFQuestion, index: int) -> str:
+    raw = "|".join(
+        [
+            prefix,
+            topic,
+            difficulty,
+            question.paper_name,
+            question.question_number,
+            str(index),
+        ]
+    )
+    return re.sub(r"[^A-Za-z0-9_.:-]+", "_", raw).strip("_") or f"{prefix}_{index}"
 
 
 def _optional_int(value: Any) -> int | None:
@@ -406,7 +498,3 @@ def _topic_title(topic: str) -> str:
 
 def _escape_xml(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-
-def _escape_xml_attr(text: str) -> str:
-    return _escape_xml(text).replace('"', "&quot;")

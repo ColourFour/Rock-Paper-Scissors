@@ -64,8 +64,11 @@ def _load_question_bank(path: Path) -> list[dict[str, Any]]:
 
 
 def _practice_record(record: dict[str, Any], asset_resolver: "_AssetResolver") -> dict[str, Any] | None:
+    if not _student_usable(record):
+        return None
+
     paper_family = _text(record.get("paper_family") or record.get("question_level_paper_family"))
-    topic = _text(record.get("topic") or record.get("question_level_topic"))
+    topic = _text(record.get("manual_topic") or record.get("topic") or record.get("question_level_topic"))
     question_number = _text(record.get("question_number"))
     question_image = _text(record.get("question_image") or record.get("screenshot_path"))
     markscheme_image = _text(record.get("markscheme_image"))
@@ -93,7 +96,9 @@ def _practice_record(record: dict[str, Any], asset_resolver: "_AssetResolver") -
         "markscheme_page_number": _page_numbers_text(record.get("markscheme_pages")),
         "qa_status": _qa_status(record),
         "qa_warnings": _qa_warnings(record),
-        "pipeline_topic": topic,
+        "pipeline_topic": _text(record.get("topic") or record.get("question_level_topic") or topic),
+        "manual_topic": _text(record.get("manual_topic")),
+        "difficulty": _text(record.get("manual_difficulty") or record.get("difficulty")),
         "marks_if_available": record.get("marks_if_available") or record.get("marks") or "",
         "question_image": question_asset["src"],
         "question_image_source_path": question_image,
@@ -104,6 +109,16 @@ def _practice_record(record: dict[str, Any], asset_resolver: "_AssetResolver") -
         "markscheme_image_resolved_path": markscheme_asset["resolved_path"],
         "markscheme_image_exists": markscheme_asset["exists"],
     }
+
+
+def _student_usable(record: dict[str, Any]) -> bool:
+    if record.get("student_usable") is False:
+        return False
+    if record.get("usable") is False:
+        return False
+    if _text(record.get("crop_status")).lower() == "bad":
+        return False
+    return True
 
 
 def _bug_report_payload(config: PracticePageConfig) -> dict[str, Any]:
@@ -286,6 +301,12 @@ def _html_document(records: list[dict[str, Any]], bug_report_config: dict[str, A
       color: var(--muted);
     }}
 
+    .progress {{
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-weight: 700;
+    }}
+
     .meta {{
       display: flex;
       flex-wrap: wrap;
@@ -388,9 +409,11 @@ def _html_document(records: list[dict[str, Any]], bug_report_config: dict[str, A
         <select id="topicSelect"></select>
       </label>
       <button id="questionButton" type="button">Give me a question</button>
+      <button id="resetProgressButton" class="secondary-button" type="button">Reset progress</button>
     </section>
 
     <p id="status" class="status" role="status"></p>
+    <p id="progress" class="progress" aria-live="polite">Seen 0 / 0</p>
 
     <section id="questionArea" hidden>
       <div class="meta">
@@ -425,13 +448,19 @@ def _html_document(records: list[dict[str, Any]], bug_report_config: dict[str, A
   <script>
     const records = Array.isArray(window.QUESTION_BANK) ? window.QUESTION_BANK : [];
     const bugReportConfig = window.BUG_REPORT_CONFIG || {{}};
-    const state = {{ current: null }};
+    const STORAGE_KEY = "examBankPracticeProgress:v2";
+    const state = {{
+      current: null,
+      progress: loadProgress(),
+    }};
 
     const paperSelect = document.querySelector("#paperSelect");
     const topicSelect = document.querySelector("#topicSelect");
     const questionButton = document.querySelector("#questionButton");
+    const resetProgressButton = document.querySelector("#resetProgressButton");
     const markschemeButton = document.querySelector("#markschemeButton");
     const statusLine = document.querySelector("#status");
+    const progressLine = document.querySelector("#progress");
     const questionArea = document.querySelector("#questionArea");
     const markschemeArea = document.querySelector("#markschemeArea");
     const paperMeta = document.querySelector("#paperMeta");
@@ -457,6 +486,84 @@ def _html_document(records: list[dict[str, Any]], bug_report_config: dict[str, A
       statusLine.textContent = message;
     }}
 
+    function recordId(record) {{
+      return String(record.question_id || [
+        record.paper_name || record.paper_family || "unknown-paper",
+        record.topic || "unknown-topic",
+        record.question_label || record.question_number || "unknown-question",
+        record.question_image || "",
+      ].join("|"));
+    }}
+
+    function poolKey(paper = paperSelect.value, topic = topicSelect.value) {{
+      return `${{paper || ""}}::${{topic || ""}}`;
+    }}
+
+    function filteredRecords() {{
+      const paper = paperSelect.value;
+      const topic = topicSelect.value;
+      return records.filter((record) => record.paper_family === paper && record.topic === topic);
+    }}
+
+    function loadProgress() {{
+      try {{
+        const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{{}}");
+        if (!parsed || typeof parsed !== "object") throw new Error("Progress must be an object.");
+        const pools = parsed.pools && typeof parsed.pools === "object" ? parsed.pools : {{}};
+        return {{
+          selectedPaper: typeof parsed.selectedPaper === "string" ? parsed.selectedPaper : "",
+          selectedTopic: typeof parsed.selectedTopic === "string" ? parsed.selectedTopic : "",
+          pools,
+        }};
+      }} catch (error) {{
+        console.warn("Practice progress storage was reset", error);
+        return {{ selectedPaper: "", selectedTopic: "", pools: {{}} }};
+      }}
+    }}
+
+    function saveProgress() {{
+      try {{
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state.progress));
+      }} catch (error) {{
+        console.warn("Practice progress could not be saved", error);
+      }}
+    }}
+
+    function saveSelectedFilters() {{
+      state.progress.selectedPaper = paperSelect.value || "";
+      state.progress.selectedTopic = topicSelect.value || "";
+      saveProgress();
+    }}
+
+    function seenSetForCurrentPool() {{
+      const key = poolKey();
+      const values = Array.isArray(state.progress.pools[key]) ? state.progress.pools[key] : [];
+      return new Set(values.map(String));
+    }}
+
+    function writeSeenSetForCurrentPool(seen) {{
+      state.progress.pools[poolKey()] = [...seen];
+      saveProgress();
+    }}
+
+    function validSeenSetForCurrentPool(choices = filteredRecords()) {{
+      const eligibleIds = new Set(choices.map(recordId));
+      const seen = seenSetForCurrentPool();
+      return new Set([...seen].filter((id) => eligibleIds.has(id)));
+    }}
+
+    function updateProgressDisplay(choices = filteredRecords()) {{
+      const total = choices.length;
+      const seen = validSeenSetForCurrentPool(choices);
+      if (seen.size !== seenSetForCurrentPool().size) {{
+        writeSeenSetForCurrentPool(seen);
+      }}
+      progressLine.textContent = `Seen ${{seen.size}} / ${{total}}`;
+      resetProgressButton.disabled = total === 0 || seen.size === 0;
+      questionButton.disabled = total === 0 || seen.size >= total;
+      return {{ seen, total }};
+    }}
+
     function setupPaperOptions() {{
       const papers = [...new Set(records.map((record) => record.paper_family).filter(Boolean))]
         .sort((a, b) => a.localeCompare(b, undefined, {{ numeric: true }}));
@@ -474,12 +581,22 @@ def _html_document(records: list[dict[str, Any]], bug_report_config: dict[str, A
         paperSelect.innerHTML = '<option value="">No papers available</option>';
         topicSelect.innerHTML = '<option value="">No topics available</option>';
         questionButton.disabled = true;
+        resetProgressButton.disabled = true;
+        updateProgressDisplay([]);
         setStatus("No usable records were embedded in this page.");
         return;
       }}
 
+      if (state.progress.selectedPaper && papers.includes(state.progress.selectedPaper)) {{
+        paperSelect.value = state.progress.selectedPaper;
+      }}
       updateTopicOptions();
-      setStatus(`${{records.length}} questions ready.`);
+      const progress = updateProgressDisplay();
+      if (progress.total && progress.seen.size >= progress.total) {{
+        setStatus("You've completed all available questions in this set. Reset progress to start again.");
+      }} else {{
+        setStatus(`${{records.length}} questions ready. Questions will not repeat in a set until you reset progress.`);
+      }}
     }}
 
     function updateTopicOptions() {{
@@ -501,21 +618,52 @@ def _html_document(records: list[dict[str, Any]], bug_report_config: dict[str, A
         topicSelect.innerHTML = '<option value="">No topics available</option>';
         questionButton.disabled = true;
       }} else {{
+        if (state.progress.selectedTopic && topics.includes(state.progress.selectedTopic)) {{
+          topicSelect.value = state.progress.selectedTopic;
+        }}
         questionButton.disabled = false;
       }}
+      saveSelectedFilters();
+      updateProgressDisplay();
     }}
 
     function showRandomQuestion() {{
-      const paper = paperSelect.value;
-      const topic = topicSelect.value;
-      const choices = records.filter((record) => record.paper_family === paper && record.topic === topic);
+      const choices = filteredRecords();
       if (!choices.length) {{
         setStatus("No questions match that paper and topic.");
         questionArea.hidden = true;
+        updateProgressDisplay(choices);
         return;
       }}
 
-      const record = choices[Math.floor(Math.random() * choices.length)];
+      let seen = validSeenSetForCurrentPool(choices);
+      const currentId = state.current ? recordId(state.current) : "";
+      let remaining = choices.filter((record) => !seen.has(recordId(record)));
+      if (remaining.length > 1 && currentId) {{
+        remaining = remaining.filter((record) => recordId(record) !== currentId);
+      }}
+
+      if (!remaining.length) {{
+        writeSeenSetForCurrentPool(seen);
+        updateProgressDisplay(choices);
+        setStatus("You've completed all available questions in this set. Reset progress to start again.");
+        return;
+      }}
+
+      const record = remaining[Math.floor(Math.random() * remaining.length)];
+      showQuestion(record);
+      seen = validSeenSetForCurrentPool(choices);
+      seen.add(recordId(record));
+      writeSeenSetForCurrentPool(seen);
+      const latestProgress = updateProgressDisplay(choices);
+      if (latestProgress.seen.size === choices.length) {{
+        setStatus("You've completed all available questions in this set.");
+      }} else {{
+        setStatus("");
+      }}
+    }}
+
+    function showQuestion(record) {{
       state.current = record;
 
       paperMeta.textContent = record.paper_family;
@@ -530,7 +678,15 @@ def _html_document(records: list[dict[str, Any]], bug_report_config: dict[str, A
       markschemeButton.textContent = "Show mark scheme";
       updateBugReportControls(record);
       questionArea.hidden = false;
-      setStatus("");
+    }}
+
+    function resetProgress() {{
+      delete state.progress.pools[poolKey()];
+      state.current = null;
+      questionArea.hidden = true;
+      saveProgress();
+      updateProgressDisplay();
+      setStatus("Progress reset for this set. Ask for a question when you're ready.");
     }}
 
     function updateBugReportControls(record) {{
@@ -656,15 +812,29 @@ def _html_document(records: list[dict[str, Any]], bug_report_config: dict[str, A
     paperSelect.addEventListener("change", () => {{
       updateTopicOptions();
       questionArea.hidden = true;
-      setStatus("Choose a topic, then ask for a question.");
+      const progress = updateProgressDisplay();
+      if (progress.total && progress.seen.size >= progress.total) {{
+        setStatus("You've completed all available questions in this set. Reset progress to start again.");
+      }} else {{
+        setStatus("Choose a topic, then ask for a question.");
+      }}
     }});
 
     topicSelect.addEventListener("change", () => {{
       questionArea.hidden = true;
-      setStatus("Ready.");
+      saveSelectedFilters();
+      const progress = updateProgressDisplay();
+      if (!progress.total) {{
+        setStatus("No questions match that paper and topic.");
+      }} else if (progress.seen.size >= progress.total) {{
+        setStatus("You've completed all available questions in this set. Reset progress to start again.");
+      }} else {{
+        setStatus("Ready.");
+      }}
     }});
 
     questionButton.addEventListener("click", showRandomQuestion);
+    resetProgressButton.addEventListener("click", resetProgress);
 
     questionImage.addEventListener("error", () => reportImageError("question", state.current, questionImage));
     markschemeImage.addEventListener("error", () => reportImageError("markscheme", state.current, markschemeImage));

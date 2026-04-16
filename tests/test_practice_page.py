@@ -47,6 +47,11 @@ def test_practice_page_embeds_data_and_uses_relative_image_paths(tmp_path: Path,
     assert "Give me a question" in html
     assert "Show mark scheme" in html
     assert "Copy bug report" in html
+    assert "Reset progress" in html
+    assert "Seen 0 / 0" in html
+    assert "examBankPracticeProgress:v2" in html
+    assert "remaining = choices.filter" in html
+    assert "You've completed all available questions in this set" in html
 
 
 def test_practice_page_embeds_missing_asset_debug_for_broken_paths(tmp_path: Path, monkeypatch) -> None:
@@ -182,3 +187,94 @@ def test_practice_page_publish_copy_uses_local_asset_paths(tmp_path: Path, monke
     assert "assets/output/images/markscheme.png" in html
     assert (tmp_path / "practice" / "assets" / "output" / "images" / "question.png").read_bytes() == b"question"
     assert (tmp_path / "practice" / "assets" / "output" / "images" / "markscheme.png").read_bytes() == b"markscheme"
+
+
+def test_practice_page_progress_logic_is_filter_aware_and_persistent(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    images_dir = tmp_path / "output" / "images"
+    images_dir.mkdir(parents=True)
+    for name in ["q1.png", "q2.png", "ms1.png", "ms2.png"]:
+        (images_dir / name).write_bytes(name.encode("utf-8"))
+
+    question_bank = tmp_path / "question_bank.json"
+    question_bank.write_text(
+        json.dumps(
+            [
+                {
+                    "paper_family": "P1",
+                    "topic": "quadratics",
+                    "question_number": "1",
+                    "question_id": "p1-q1",
+                    "question_image": "output/images/q1.png",
+                    "markscheme_image": "output/images/ms1.png",
+                },
+                {
+                    "paper_family": "P1",
+                    "topic": "quadratics",
+                    "question_number": "2",
+                    "question_id": "p1-q2",
+                    "question_image": "output/images/q2.png",
+                    "markscheme_image": "output/images/ms2.png",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = build_practice_page(question_bank, tmp_path / "output" / "practice")
+    html = result.html_path.read_text(encoding="utf-8")
+
+    assert "localStorage.getItem(STORAGE_KEY)" in html
+    assert "localStorage.setItem(STORAGE_KEY" in html
+    assert "function poolKey" in html
+    assert "function validSeenSetForCurrentPool" in html
+    assert "function resetProgress" in html
+    assert "questionButton.disabled = total === 0 || seen.size >= total" in html
+
+
+def test_practice_page_uses_manual_topic_and_excludes_manual_bad_records(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    images_dir = tmp_path / "output" / "images"
+    images_dir.mkdir(parents=True)
+    for name in ["q1.png", "q2.png", "ms1.png", "ms2.png"]:
+        (images_dir / name).write_bytes(name.encode("utf-8"))
+
+    question_bank = tmp_path / "question_bank.json"
+    question_bank.write_text(
+        json.dumps(
+            [
+                {
+                    "paper_family": "P1",
+                    "topic": "functions",
+                    "manual_topic": "quadratics",
+                    "question_number": "1",
+                    "question_id": "p1-q1",
+                    "question_image": "output/images/q1.png",
+                    "markscheme_image": "output/images/ms1.png",
+                    "usable": True,
+                    "crop_status": "ok",
+                },
+                {
+                    "paper_family": "P1",
+                    "topic": "functions",
+                    "manual_topic": "polynomials",
+                    "question_number": "2",
+                    "question_id": "p1-q2",
+                    "question_image": "output/images/q2.png",
+                    "markscheme_image": "output/images/ms2.png",
+                    "usable": False,
+                    "crop_status": "bad",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = build_practice_page(question_bank, tmp_path / "output" / "practice")
+    html = result.html_path.read_text(encoding="utf-8")
+
+    assert result.usable_records == 1
+    assert result.skipped_records == 1
+    assert '"topic":"quadratics"' in html
+    assert '"pipeline_topic":"functions"' in html
+    assert "p1-q2" not in html

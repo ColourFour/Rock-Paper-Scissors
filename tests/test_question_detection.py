@@ -5,6 +5,9 @@ from exam_bank.exporters import write_csv, write_json
 from exam_bank.identifiers import normalize_question_id
 from exam_bank.image_rendering import _detect_prompt_regions
 from exam_bank.mark_schemes import (
+    MarkSchemeAnchor,
+    MarkSchemeTable,
+    MarkSchemeWord,
     _detect_mark_scheme_tables,
     _detect_table_question_anchors,
     _mark_total_for_question_block,
@@ -27,6 +30,10 @@ def cell(page: int, text: str, y: float, x: float, width: float = 45) -> TextBlo
 
 def hline(y: float, x0: float = 40, x1: float = 560) -> BoundingBox:
     return BoundingBox(x0, y, x1, y + 1)
+
+
+def ms_word(page: int, text: str, x: float, y: float, width: float = 32) -> MarkSchemeWord:
+    return MarkSchemeWord(page_number=page, text=text, bbox=BoundingBox(x, y, x + width, y + 12))
 
 
 def vline(x: float, y0: float = 95, y1: float = 230) -> BoundingBox:
@@ -145,6 +152,10 @@ def test_question_id_normalization_preserves_subparts() -> None:
     assert normalize_question_id("3a") == "3(a)"
     assert normalize_question_id("Question 3(a)") == "3(a)"
     assert _parse_mark_scheme_question_cell("3(b)", {"3(b)"}) == "3(b)"
+    assert _parse_mark_scheme_question_cell("8x4", {"8"}) is None
+    assert _parse_mark_scheme_question_cell("2(x2", {"2"}) is None
+    assert _parse_mark_scheme_question_cell("(5", {"5"}) is None
+    assert _parse_mark_scheme_question_cell("4tan", {"4"}) is None
 
 
 def test_mark_scheme_table_detection_requires_answer_table_headers() -> None:
@@ -323,6 +334,50 @@ def test_mark_scheme_mapping_rejects_missing_subpart_and_marks_mismatch() -> Non
 
     assert validation_flags == ["marks_total_mismatch"]
     assert reason == "marks_total_mismatch"
+
+
+def test_mark_scheme_mark_total_sums_standalone_subpart_totals_after_alternatives() -> None:
+    table = MarkSchemeTable(
+        page_number=6,
+        bbox=BoundingBox(40, 50, 540, 430),
+        question_col_right=120,
+        marks_col_left=350,
+        marks_col_right=420,
+        header_bottom=70,
+        confidence="high",
+        header_detected=["Question", "Answer", "Marks", "Guidance"],
+    )
+    layout = PageLayout(page_number=6, width=595, height=842, blocks=[])
+    words_by_page = {
+        6: [
+            ms_word(6, "8(a)", 60, 90),
+            ms_word(6, "M1", 360, 90),
+            ms_word(6, "A1", 360, 110),
+            ms_word(6, "A1", 360, 130),
+            ms_word(6, "3", 360, 150),
+            ms_word(6, "8(b)", 60, 175),
+            ms_word(6, "B1", 360, 175),
+            ms_word(6, "B1", 360, 195),
+            ms_word(6, "2", 360, 215),
+            ms_word(6, "8(c)", 60, 240),
+            ms_word(6, "B1", 360, 240),
+            ms_word(6, "B1", 360, 260),
+            ms_word(6, "2", 360, 280),
+            ms_word(6, "8(d)", 60, 305),
+            ms_word(6, "M1", 360, 305),
+            ms_word(6, "A1", 360, 325),
+            ms_word(6, "Alternative", 180, 345),
+            ms_word(6, "method", 245, 345),
+            ms_word(6, "M1", 360, 365),
+            ms_word(6, "A1", 360, 385),
+            ms_word(6, "2", 360, 405),
+        ]
+    }
+    anchor = MarkSchemeAnchor("8(a)", 6, 90, 102, 60, "8(a)", table)
+
+    mark_total = _mark_total_for_question_block([layout], anchor, None, {6: table}, words_by_page)
+
+    assert mark_total == 9
 
 
 def test_mark_scheme_table_detection_ignores_earlier_non_answer_table() -> None:
@@ -764,10 +819,43 @@ def test_prompt_crop_excludes_page_furniture_graphics_and_trims_edges() -> None:
     regions, flags = _detect_prompt_regions(span, [layout], config)
 
     assert {"barcode_excluded", "side_panel_excluded", "answer_lines_excluded"} <= set(flags)
-    assert len(regions) == 1
+    assert len(regions) == 2
+    assert [region.region_kind for region in regions] == ["text", "figure"]
+    assert regions[0].bbox.y1 <= regions[1].bbox.y0
+    assert regions[0].text_trimmed_for_figure
     assert regions[0].bbox.x0 >= config.detection.crop_left_margin
     assert regions[0].bbox.x1 <= layout.width - config.detection.crop_right_margin
     assert [item["label"] for item in regions[0].excluded_regions] == ["barcode", "side_panel", "answer_lines"]
+
+
+def test_prompt_crop_separates_text_and_figure_without_overlap() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "1 The figure shows a graph. [4]", 100),
+            block(1, "Find the gradient of the tangent.", 150),
+            block(1, "State the intercept.", 305),
+        ],
+        graphics=[
+            BoundingBox(120, 180, 360, 285),
+            BoundingBox(121, 181, 361, 286),
+        ],
+    )
+    span = detect_question_spans([layout], Path("paper_qp.pdf"), config)[0]
+
+    regions, flags = _detect_prompt_regions(span, [layout], config)
+
+    assert "figure_region_separated" in flags
+    assert "text_figure_overlap_trimmed" in flags
+    assert "duplicate_visual_regions_removed" in flags
+    assert [region.region_kind for region in regions] == ["text", "figure", "text"]
+    assert regions[0].bbox.y1 <= regions[1].bbox.y0
+    assert regions[1].bbox.y1 <= regions[2].bbox.y0
+    assert regions[1].graphics
+    assert sum(region.duplicate_graphics_removed for region in regions) == 1
 
 
 def test_question_span_excludes_margin_text_and_control_artifacts() -> None:
@@ -792,3 +880,41 @@ def test_question_span_excludes_margin_text_and_control_artifacts() -> None:
 
     assert "DO NOT WRITE" not in span.combined_text
     assert "\x01" not in span.combined_text
+
+
+def test_question_start_keeps_meaningful_text_with_pdf_control_chars() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "1 (a) Find the first three terms of \x001 + x\x01^{5}. [1]", 100),
+            block(1, "2 Next question. [3]", 260),
+        ],
+    )
+
+    spans = detect_question_spans([layout], Path("9709_s21_qp_12.pdf"), config)
+
+    assert [span.question_number for span in spans] == ["1", "2"]
+    assert "\x01" not in spans[0].combined_text
+    assert "1 + x" in spans[0].combined_text
+
+
+def test_question_starts_skip_large_jump_when_next_expected_question_exists() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "1 First question. [2]", 80),
+            block(1, "2 Second question asks about", 170),
+            block(1, "8 letters in the word COCOONED. [1]", 195, x=96),
+            block(1, "3 Third question. [4]", 300),
+        ],
+    )
+
+    spans = detect_question_spans([layout], Path("9709_s23_qp_51.pdf"), config)
+
+    assert [span.question_number for span in spans] == ["1", "2", "3"]

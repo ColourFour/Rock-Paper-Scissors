@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from .config import AppConfig, load_config
+from .manual_review import apply_manual_review, build_manual_review_page
 from .pipeline import process_batch, process_folder, process_sample
 from .practice_page import build_practice_page
 from .qa import run_qa
@@ -77,6 +78,19 @@ def main(argv: list[str] | None = None) -> int:
     practice_page.add_argument("--publish-dir", help="GitHub Pages export directory. Defaults to practice_page.publish_dir.")
     practice_page.add_argument("--no-publish", action="store_true", help="Only write the local output/practice page; skip the GitHub Pages export.")
     practice_page.set_defaults(func=cmd_practice_page)
+
+    manual_review_page = subparsers.add_parser("manual-review-page", help="Generate a local browser page for manual topic/difficulty curation.")
+    manual_review_page.add_argument("--config", default="config.yaml", help="Path to config.yaml.")
+    manual_review_page.add_argument("--question-bank", help="Path to a question_bank.json file. Defaults to output/json/question_bank.json.")
+    manual_review_page.add_argument("--output-dir", help="Output directory. Defaults to manual_review.output_dir.")
+    manual_review_page.set_defaults(func=cmd_manual_review_page)
+
+    apply_review = subparsers.add_parser("apply-manual-review", help="Merge exported manual review JSON into a question bank.")
+    apply_review.add_argument("--config", default="config.yaml", help="Path to config.yaml.")
+    apply_review.add_argument("--question-bank", help="Path to input question_bank.json. Defaults to output/json/question_bank.json.")
+    apply_review.add_argument("--review-json", required=True, help="Manual review export JSON from the local review page.")
+    apply_review.add_argument("--output-json", help="Merged question bank path. Defaults to output/json/question_bank_reviewed.json.")
+    apply_review.set_defaults(func=cmd_apply_manual_review)
 
     open_qa = subparsers.add_parser("open-qa", help="Open output/qa/review.html. No local server is needed for the generated QA page.")
     open_qa.add_argument("--config", default="config.yaml", help="Path to config.yaml.")
@@ -236,6 +250,56 @@ def cmd_practice_page(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_manual_review_page(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    question_bank = Path(args.question_bank) if args.question_bank else config.output.json_dir / config.naming.json_name
+    if not question_bank.exists():
+        print(
+            f"Question bank JSON not found: {question_bank}\n"
+            "Run `python -m exam_bank.cli process --config config.yaml` first, "
+            "or pass `--question-bank PATH` to an existing JSON export.",
+            file=sys.stderr,
+        )
+        return 1
+    output_dir = Path(args.output_dir) if args.output_dir else config.manual_review.output_dir
+    result = build_manual_review_page(question_bank, output_dir, config)
+    print(f"Manual review records: {result.record_count}")
+    print(f"Manual review page: {result.html_path}")
+    print("Start a local server from the repo root:")
+    print("  python3 -m http.server 8001")
+    print(f"Then open: {_local_server_url(result.html_path, port=8001)}")
+    print("Edits are saved in browser localStorage. Use Export review JSON when you are done.")
+    return 0
+
+
+def cmd_apply_manual_review(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    question_bank = Path(args.question_bank) if args.question_bank else config.output.json_dir / config.naming.json_name
+    if not question_bank.exists():
+        print(
+            f"Question bank JSON not found: {question_bank}\n"
+            "Run `python -m exam_bank.cli process --config config.yaml` first, "
+            "or pass `--question-bank PATH` to an existing JSON export.",
+            file=sys.stderr,
+        )
+        return 1
+    review_json = Path(args.review_json)
+    if not review_json.exists():
+        print(f"Manual review JSON not found: {review_json}", file=sys.stderr)
+        return 1
+    output_json = Path(args.output_json) if args.output_json else config.output.json_dir / "question_bank_reviewed.json"
+    result = apply_manual_review(question_bank, review_json, output_json)
+    print(f"Manual review input records: {result.input_record_count}")
+    print(f"Manual reviews applied: {result.matched_reviews}")
+    if result.unmatched_reviews:
+        print(f"Manual reviews not matched to current question bank: {result.unmatched_reviews}")
+    print(f"Reviewed question bank: {result.output_json_path}")
+    print("Use this reviewed JSON for student outputs, for example:")
+    print(f"  python -m exam_bank.cli practice-page --config {args.config} --question-bank {result.output_json_path}")
+    print(f"  python -m exam_bank.cli topic-pdfs --config {args.config} --question-bank {result.output_json_path}")
+    return 0
+
+
 def cmd_open_qa(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     return _open_path(config.output.json_dir.parent / "qa" / "review.html", "QA review")
@@ -258,10 +322,10 @@ def _print_topic_pdf_result(result: TopicPDFResult) -> None:
     print(f"Topic PDFs: {len(pdf_paths)}")
     for path in pdf_paths:
         print(f"  {path}")
-    print(f"Topic PDF mark scheme links added: {result.mark_scheme_link_count}")
+    print(f"Topic PDF embedded mark schemes: {result.mark_scheme_link_count}")
     missing_links = result.missing_mark_scheme_link_count
     if missing_links:
-        print(f"Topic PDF records missing mark scheme image path: {missing_links}")
+        print(f"Topic PDF records with unavailable mark scheme image: {missing_links}")
     skipped_count = result.skipped_count
     if skipped_count:
         print(f"Topic PDF skipped records: {skipped_count}")
@@ -330,6 +394,14 @@ def _index_url_path(html_path: Path) -> str:
         relative = relative.parent
     path = relative.as_posix().strip("/")
     return f"{path}/" if path else ""
+
+
+def _local_server_url(path: Path, *, port: int) -> str:
+    try:
+        relative = path.resolve().relative_to(Path.cwd().resolve())
+    except ValueError:
+        relative = path
+    return f"http://localhost:{port}/{relative.as_posix()}"
 
 
 def _infer_github_pages_base_url() -> str:

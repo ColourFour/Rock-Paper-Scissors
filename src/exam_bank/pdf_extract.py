@@ -76,7 +76,9 @@ def _extract_text_blocks(page: Any, page_number: int, config: AppConfig) -> list
         for raw_line in raw_block.get("lines", []):
             for span in raw_line.get("spans", []):
                 if str(span.get("text", "")).strip():
-                    spans.append(span)
+                    normalized_span = dict(span)
+                    normalized_span["bbox"] = _visual_bbox(page, span.get("bbox", [0, 0, 0, 0]))
+                    spans.append(normalized_span)
 
     visual_lines = _group_spans_into_visual_lines(spans, config.detection.span_line_y_tolerance)
     blocks: list[TextBlock] = []
@@ -238,7 +240,7 @@ def _extract_graphics(page: Any) -> list[BoundingBox]:
     for drawing in page.get_drawings():
         rect = drawing.get("rect")
         if rect and rect.is_valid and not rect.is_empty:
-            boxes.append(BoundingBox(float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1)))
+            boxes.append(_visual_box_from_rect(page, rect))
 
     try:
         image_infos = page.get_image_info(xrefs=True)
@@ -247,9 +249,26 @@ def _extract_graphics(page: Any) -> list[BoundingBox]:
     for image_info in image_infos:
         bbox = image_info.get("bbox")
         if bbox:
-            x0, y0, x1, y1 = bbox
-            boxes.append(BoundingBox(float(x0), float(y0), float(x1), float(y1)))
+            boxes.append(_visual_box_from_rect(page, bbox))
     return boxes
+
+
+def _visual_bbox(page: Any, bbox: Any) -> list[float]:
+    box = _visual_box_from_rect(page, bbox)
+    return [box.x0, box.y0, box.x1, box.y1]
+
+
+def _visual_box_from_rect(page: Any, rect_like: Any) -> BoundingBox:
+    try:
+        import fitz
+
+        rect = fitz.Rect(rect_like)
+        if getattr(page, "rotation", 0):
+            rect = rect * page.rotation_matrix
+        return BoundingBox(float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1))
+    except Exception:
+        x0, y0, x1, y1 = rect_like
+        return BoundingBox(float(x0), float(y0), float(x1), float(y1))
 
 
 def _ocr_page(page: Any, page_number: int, config: AppConfig) -> list[TextBlock]:

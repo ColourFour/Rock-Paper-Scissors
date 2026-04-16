@@ -167,7 +167,7 @@ classification:
 topic_pdfs:
   enable_topic_pdfs: true
   topic_pdf_output_dir: output/topic_pdfs
-  include_mark_scheme_link: true
+  embed_mark_schemes: true
   page_size: A4
   margin: 42
   image_max_width: 500
@@ -195,6 +195,9 @@ practice_page:
       question_image: question_image
       markscheme_image: markscheme_image
       report_text: report_text
+
+manual_review:
+  output_dir: output/manual_review
 
 debug:
   enabled: false

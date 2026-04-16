@@ -430,10 +430,30 @@ def _check_existing_review_flags(review_flags: list[str], flags: list[str], note
         _add(flags, "question_crop_suspicious")
     if {"header_footer_contamination"} & review_flag_set:
         _add(flags, "possible_footer_in_question_crop")
+    if {"text_figure_overlap_trimmed", "question_text_figure_overlap_prevented"} & review_flag_set:
+        _add(flags, "question_text_figure_overlap_trimmed")
+        notes.append("question text crop overlapped a detected figure and was trimmed before rendering")
+    if {"text_figure_overlap_unresolved"} & review_flag_set:
+        _add(flags, "text_figure_overlap_in_question_crop")
+        _add(flags, "possible_duplicate_figure_content")
+        _add(flags, "question_crop_suspicious")
+        notes.append("question crop still has unresolved text/figure overlap")
+    if {"duplicate_visual_fragment_excluded"} & review_flag_set:
+        _add(flags, "duplicate_visual_regions_detected")
+        notes.append("duplicate or overlapping visual figure sources were detected during crop selection")
     cleanup_flags = sorted(
         flag
         for flag in review_flag_set
-        if flag.endswith("_excluded") or flag.startswith("excluded_boilerplate_") or flag == "duplicate_visual_regions_removed"
+        if flag.endswith("_excluded")
+        or flag.startswith("excluded_boilerplate_")
+        or flag
+        in {
+            "duplicate_visual_regions_removed",
+            "figure_region_separated",
+            "text_figure_overlap_trimmed",
+            "question_text_figure_overlap_prevented",
+            "overlapping_crop_region_trimmed",
+        }
     )
     if cleanup_flags:
         notes.append(f"crop cleanup applied: {', '.join(cleanup_flags)}")

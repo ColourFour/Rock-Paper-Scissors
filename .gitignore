@@ -11,6 +11,7 @@ output/json/*
 output/csv/*
 output/review/*
 output/qa/*
+output/manual_review/*
 output/debug/*
 output/topic_pdfs/*
 output/practice/*
@@ -19,5 +20,6 @@ output/practice/*
 !output/csv/.gitkeep
 !output/review/.gitkeep
 !output/qa/.gitkeep
+!output/manual_review/.gitkeep
 !output/debug/.gitkeep
 !output/topic_pdfs/.gitkeep

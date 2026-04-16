@@ -89,7 +89,7 @@ class QuestionSpan:
 
     @property
     def combined_text(self) -> str:
-        return "\n".join(block.text.strip() for block in self.blocks if block.text.strip()).strip()
+        return "\n".join(_clean_model_text(block.text) for block in self.blocks if _clean_model_text(block.text)).strip()
 
 
 @dataclass
@@ -340,3 +340,8 @@ def _confidence_score(label: str) -> float:
         "medium": 0.66,
         "low": 0.35,
     }.get(label, 0.0)
+
+
+def _clean_model_text(text: str) -> str:
+    stripped_controls = "".join(char if ord(char) >= 32 or char in "\n\t\r" else " " for char in text)
+    return " ".join(stripped_controls.replace("\u00a0", " ").split())

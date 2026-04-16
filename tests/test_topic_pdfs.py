@@ -6,7 +6,6 @@ from exam_bank.config import AppConfig
 from exam_bank.topic_pdfs import (
     DIFFICULTY_SECTIONS,
     _group_by_topic,
-    _mark_scheme_link_target,
     _sorted_questions,
     _valid_questions,
     build_topic_pdfs,
@@ -51,7 +50,6 @@ def test_topic_pdf_validation_groups_and_sorts_records(tmp_path: Path) -> None:
     assert list(grouped) == ["calculus"]
     assert [question.question_number for question in sorted_questions] == ["2", "10"]
     assert sorted_questions[1].markscheme_image_path == markscheme_a
-    assert _mark_scheme_link_target(sorted_questions[1], tmp_path / "topic_pdfs") == "../ms_a.png"
 
 
 def test_topic_pdf_validation_flags_missing_metadata() -> None:
@@ -71,9 +69,41 @@ def test_topic_pdf_validation_flags_missing_metadata() -> None:
     ]
 
 
-def test_topic_pdf_build_counts_mark_scheme_links(tmp_path: Path) -> None:
+def test_topic_pdf_validation_excludes_manual_unusable_records(tmp_path: Path) -> None:
+    image = tmp_path / "q.png"
+    image.write_bytes(b"not checked here")
+    records = [
+        {
+            "topic": "calculus",
+            "difficulty": "easy",
+            "question_image": str(image),
+            "paper_name": "paper_a",
+            "question_number": "1",
+            "student_usable": False,
+        },
+        {
+            "topic": "calculus",
+            "difficulty": "easy",
+            "question_image": str(image),
+            "paper_name": "paper_a",
+            "question_number": "2",
+            "crop_status": "bad",
+        },
+    ]
+
+    valid, review_items = _valid_questions(records)
+
+    assert not valid
+    assert [item.issue_type for item in review_items] == [
+        "topic_pdf_manual_excluded",
+        "topic_pdf_manual_excluded",
+    ]
+
+
+def test_topic_pdf_embeds_mark_scheme_pages_and_internal_links(tmp_path: Path) -> None:
     pil_image = pytest.importorskip("PIL.Image")
     pytest.importorskip("reportlab")
+    fitz = pytest.importorskip("fitz")
 
     question_a = tmp_path / "q_a.png"
     question_b = tmp_path / "q_b.png"
@@ -84,7 +114,7 @@ def test_topic_pdf_build_counts_mark_scheme_links(tmp_path: Path) -> None:
 
     config = AppConfig()
     config.topic_pdfs.topic_pdf_output_dir = tmp_path / "topic_pdfs"
-    config.topic_pdfs.include_mark_scheme_link = True
+    config.topic_pdfs.embed_mark_schemes = True
     records = [
         {
             "topic": "calculus",
@@ -109,3 +139,16 @@ def test_topic_pdf_build_counts_mark_scheme_links(tmp_path: Path) -> None:
     assert result.pdf_paths[0].exists()
     assert result.mark_scheme_link_count == 1
     assert result.missing_mark_scheme_link_count == 1
+
+    with fitz.open(result.pdf_paths[0]) as pdf:
+        assert pdf.page_count == 3
+        links = []
+        for page in pdf:
+            links.extend(page.get_links())
+        assert links
+        assert all(link.get("kind") != fitz.LINK_URI for link in links)
+        assert all("uri" not in link for link in links)
+        text = "\n".join(page.get_text() for page in pdf)
+    assert "Go to mark scheme" in text
+    assert "Back to question" in text
+    assert "Mark scheme image unavailable" in text

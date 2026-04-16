@@ -21,6 +21,11 @@ class CropRegion:
     duplicate_graphics_removed: int = 0
     original_bbox: BoundingBox | None = None
     excluded_regions: list[dict[str, object]] = field(default_factory=list)
+    region_kind: str = "combined"
+    text_bbox: BoundingBox | None = None
+    figure_bbox: BoundingBox | None = None
+    text_figure_overlap_area: float = 0.0
+    text_trimmed_for_figure: bool = False
 
 
 def render_question_image(
@@ -167,8 +172,22 @@ def _detect_prompt_regions(
             if duplicate_count:
                 flags.append("duplicate_visual_regions_removed")
                 flags.append("duplicate_visual_fragment_excluded")
-            boxes = [text_box] + graphics
-            original_box = _union_boxes(boxes).padded(config.detection.crop_padding, layout.width, layout.height)
+            if graphics:
+                separated, separation_flags = _separate_text_and_figure_regions(
+                    page_number,
+                    segment,
+                    text_box,
+                    graphics,
+                    duplicate_count,
+                    excluded_regions,
+                    layout,
+                    config,
+                )
+                flags.extend(separation_flags)
+                regions.extend(separated)
+                continue
+
+            original_box = text_box.padded(config.detection.crop_padding, layout.width, layout.height)
             crop_box = _clamp_crop_to_prompt_area(original_box, layout, config)
             crop_box = _trim_crop_furniture_edges(crop_box, layout, config)
             if _box_height(crop_box) < config.detection.min_crop_height:
@@ -178,13 +197,16 @@ def _detect_prompt_regions(
                     page_number=page_number,
                     bbox=crop_box,
                     text_blocks=segment,
-                    graphics=graphics,
                     duplicate_graphics_removed=duplicate_count,
                     original_bbox=original_box,
                     excluded_regions=excluded_regions,
+                    region_kind="text",
+                    text_bbox=text_box,
                 )
             )
 
+    regions, overlap_flags = _remove_meaningful_region_overlaps(regions, config)
+    flags.extend(overlap_flags)
     return regions, sorted(set(flags))
 
 
@@ -216,6 +238,8 @@ def _graphics_for_segment(text_box: BoundingBox, layout: PageLayout, config: App
         if furniture_label:
             excluded_regions.append(_excluded_region(furniture_label, graphic))
             continue
+        if graphic.y1 < text_box.y0 and text_box.y0 - graphic.y1 > 6:
+            continue
         overlaps_vertically = graphic.y1 >= top and graphic.y0 <= bottom
         overlaps_horizontally = graphic.x1 >= text_box.x0 - 30 and graphic.x0 <= text_box.x1 + 30
         graphic_width = graphic.x1 - graphic.x0
@@ -224,6 +248,176 @@ def _graphics_for_segment(text_box: BoundingBox, layout: PageLayout, config: App
         if overlaps_vertically and (overlaps_horizontally or significant_nearby_graphic):
             graphics.append(graphic)
     return graphics, excluded_regions
+
+
+def _separate_text_and_figure_regions(
+    page_number: int,
+    segment: list[TextBlock],
+    text_box: BoundingBox,
+    graphics: list[BoundingBox],
+    duplicate_count: int,
+    excluded_regions: list[dict[str, object]],
+    layout: PageLayout,
+    config: AppConfig,
+) -> tuple[list[CropRegion], list[str]]:
+    flags = ["figure_region_separated"]
+    figure_box = _figure_box_for_segment(segment, graphics, layout, config)
+    figure_crop = _trim_crop_furniture_edges(_clamp_crop_to_prompt_area(figure_box, layout, config), layout, config)
+    figure_label_blocks = [
+        block
+        for block in segment
+        if _block_belongs_to_figure(block, figure_crop, config)
+    ]
+    figure_label_ids = {id(block) for block in figure_label_blocks}
+    text_blocks = [block for block in segment if id(block) not in figure_label_ids]
+    text_segments = _split_prompt_segments(text_blocks, config)
+
+    regions: list[CropRegion] = []
+    overlap_area = _intersection_area(text_box, figure_crop)
+    if overlap_area > 1:
+        flags.extend(["text_figure_overlap_trimmed", "question_text_figure_overlap_prevented"])
+
+    for text_segment in text_segments:
+        text_region_box = _union_boxes([block.bbox for block in text_segment])
+        original_text_crop = text_region_box.padded(config.detection.crop_padding, layout.width, layout.height)
+        crop_box, trimmed = _trim_box_to_exclude_figure(
+            _trim_crop_furniture_edges(_clamp_crop_to_prompt_area(original_text_crop, layout, config), layout, config),
+            figure_crop,
+        )
+        if trimmed:
+            flags.extend(["text_figure_overlap_trimmed", "question_text_figure_overlap_prevented"])
+        if _box_height(crop_box) < config.detection.min_crop_height or _box_width(crop_box) < 8:
+            flags.append("text_region_removed_after_figure_trim")
+            continue
+        regions.append(
+            CropRegion(
+                page_number=page_number,
+                bbox=crop_box,
+                text_blocks=text_segment,
+                duplicate_graphics_removed=duplicate_count if not regions else 0,
+                original_bbox=original_text_crop,
+                excluded_regions=excluded_regions if not regions else [],
+                region_kind="text",
+                text_bbox=text_region_box,
+                figure_bbox=figure_crop,
+                text_figure_overlap_area=_intersection_area(original_text_crop, figure_crop),
+                text_trimmed_for_figure=trimmed,
+            )
+        )
+
+    regions.append(
+        CropRegion(
+            page_number=page_number,
+            bbox=figure_crop,
+            text_blocks=figure_label_blocks,
+            graphics=graphics,
+            duplicate_graphics_removed=0 if regions else duplicate_count,
+            original_bbox=figure_box,
+            excluded_regions=[] if regions else excluded_regions,
+            region_kind="figure",
+            figure_bbox=figure_crop,
+            text_bbox=_union_boxes([block.bbox for block in figure_label_blocks]) if figure_label_blocks else None,
+            text_figure_overlap_area=overlap_area,
+        )
+    )
+
+    regions = sorted(regions, key=lambda region: (region.bbox.y0, region.bbox.x0, 0 if region.region_kind == "text" else 1))
+    return regions, sorted(set(flags))
+
+
+def _figure_box_for_segment(
+    segment: list[TextBlock],
+    graphics: list[BoundingBox],
+    layout: PageLayout,
+    config: AppConfig,
+) -> BoundingBox:
+    graphic_box = _union_boxes(_merge_graphics_into_figures(graphics))
+    label_boxes = [
+        block.bbox
+        for block in segment
+        if _block_belongs_to_figure(block, graphic_box, config)
+    ]
+    return _union_boxes([graphic_box] + label_boxes).padded(config.detection.crop_padding, layout.width, layout.height)
+
+
+def _merge_graphics_into_figures(graphics: list[BoundingBox]) -> list[BoundingBox]:
+    if not graphics:
+        return []
+    # Treat graphics found for a single prompt segment as one figure source.
+    # Cambridge diagrams are often decomposed into many PDF drawing primitives;
+    # keeping a single union avoids re-rendering graph fragments separately.
+    return [_union_boxes(graphics)]
+
+
+def _block_belongs_to_figure(block: TextBlock, figure_box: BoundingBox, config: AppConfig) -> bool:
+    block_area = _box_area(block.bbox)
+    if block_area <= 0:
+        return False
+    padding = max(2.0, config.detection.crop_padding * 0.5)
+    padded_figure = BoundingBox(
+        max(0.0, figure_box.x0 - padding),
+        max(0.0, figure_box.y0 - padding),
+        figure_box.x1 + padding,
+        figure_box.y1 + padding,
+    )
+    overlap_ratio = _intersection_area(block.bbox, padded_figure) / block_area
+    if overlap_ratio >= 0.35:
+        return True
+    center_x = (block.bbox.x0 + block.bbox.x1) / 2
+    center_y = (block.bbox.y0 + block.bbox.y1) / 2
+    return padded_figure.x0 <= center_x <= padded_figure.x1 and padded_figure.y0 <= center_y <= padded_figure.y1
+
+
+def _trim_box_to_exclude_figure(box: BoundingBox, figure_box: BoundingBox) -> tuple[BoundingBox, bool]:
+    if _intersection_area(box, figure_box) <= 1:
+        return box, False
+
+    candidates: list[BoundingBox] = []
+    if box.y0 < figure_box.y0:
+        candidates.append(BoundingBox(box.x0, box.y0, box.x1, min(box.y1, figure_box.y0 - 1)))
+    if box.y1 > figure_box.y1:
+        candidates.append(BoundingBox(box.x0, max(box.y0, figure_box.y1 + 1), box.x1, box.y1))
+    if box.x0 < figure_box.x0:
+        candidates.append(BoundingBox(box.x0, box.y0, min(box.x1, figure_box.x0 - 1), box.y1))
+    if box.x1 > figure_box.x1:
+        candidates.append(BoundingBox(max(box.x0, figure_box.x1 + 1), box.y0, box.x1, box.y1))
+    candidates = [candidate for candidate in candidates if _box_width(candidate) >= 8 and _box_height(candidate) >= 4]
+    if not candidates:
+        return box, False
+    return max(candidates, key=_box_area), True
+
+
+def _remove_meaningful_region_overlaps(regions: list[CropRegion], config: AppConfig) -> tuple[list[CropRegion], list[str]]:
+    flags: list[str] = []
+    cleaned: list[CropRegion] = []
+    for region in sorted(regions, key=lambda item: (item.page_number, item.bbox.y0, item.bbox.x0)):
+        current = region
+        for previous in [item for item in cleaned if item.page_number == region.page_number]:
+            overlap = _intersection_area(current.bbox, previous.bbox)
+            if overlap <= 1 or _horizontal_overlap_ratio(current.bbox, previous.bbox) < 0.08:
+                continue
+            trimmed_box, trimmed = _trim_box_to_exclude_figure(current.bbox, previous.bbox)
+            if trimmed and _box_area(trimmed_box) < _box_area(current.bbox):
+                flags.append("overlapping_crop_region_trimmed")
+                current = CropRegion(
+                    page_number=current.page_number,
+                    bbox=trimmed_box,
+                    text_blocks=current.text_blocks,
+                    graphics=current.graphics,
+                    duplicate_graphics_removed=current.duplicate_graphics_removed,
+                    original_bbox=current.original_bbox,
+                    excluded_regions=current.excluded_regions,
+                    region_kind=current.region_kind,
+                    text_bbox=current.text_bbox,
+                    figure_bbox=current.figure_bbox,
+                    text_figure_overlap_area=max(current.text_figure_overlap_area, overlap),
+                    text_trimmed_for_figure=True,
+                )
+            elif overlap > max(12.0, _box_area(current.bbox) * 0.05):
+                flags.append("text_figure_overlap_unresolved")
+        if _box_width(current.bbox) >= 8 and _box_height(current.bbox) >= config.detection.min_crop_height * 0.5:
+            cleaned.append(current)
+    return cleaned, sorted(set(flags))
 
 
 def _is_prompt_text_block(block: TextBlock, span: QuestionSpan, layout: PageLayout, config: AppConfig) -> bool:
@@ -411,6 +605,10 @@ def _write_debug_overlays(
             draw = ImageDraw.Draw(image)
             for region in [region for region in regions if region.page_number == page_number]:
                 draw.rectangle(_pdf_box_to_pixel_box(region.bbox, zoom, image.size), outline="magenta", width=5)
+                if region.text_bbox is not None:
+                    draw.rectangle(_pdf_box_to_pixel_box(region.text_bbox, zoom, image.size), outline="lime", width=3)
+                if region.figure_bbox is not None:
+                    draw.rectangle(_pdf_box_to_pixel_box(region.figure_bbox, zoom, image.size), outline="red", width=3)
             for anchor in anchors:
                 draw.rectangle(_pdf_box_to_pixel_box(anchor.bbox, zoom, image.size), outline="orange", width=4)
             paths.append(_save_debug_image(image, span, page_number, "crop_boxes", config))
@@ -426,6 +624,7 @@ def _write_crop_metadata(span: QuestionSpan, regions: list[CropRegion], flags: l
         "regions": [
             {
                 "page_number": region.page_number,
+                "region_kind": region.region_kind,
                 "bbox_pdf_points": {
                     "x0": round(region.bbox.x0, 2),
                     "y0": round(region.bbox.y0, 2),
@@ -433,6 +632,10 @@ def _write_crop_metadata(span: QuestionSpan, regions: list[CropRegion], flags: l
                     "y1": round(region.bbox.y1, 2),
                 },
                 "original_bbox_pdf_points": _box_payload(region.original_bbox or region.bbox),
+                "text_bbox_pdf_points": _box_payload(region.text_bbox) if region.text_bbox else None,
+                "figure_bbox_pdf_points": _box_payload(region.figure_bbox) if region.figure_bbox else None,
+                "text_figure_overlap_area": round(region.text_figure_overlap_area, 2),
+                "text_trimmed_for_figure": region.text_trimmed_for_figure,
                 "text_blocks": [block.text for block in region.text_blocks],
                 "merged_blocks": len(region.text_blocks),
                 "graphics_count": len(region.graphics),
@@ -547,6 +750,15 @@ def _intersection_area(a: BoundingBox, b: BoundingBox) -> float:
 
 def _box_area(box: BoundingBox) -> float:
     return max(0.0, box.x1 - box.x0) * max(0.0, box.y1 - box.y0)
+
+
+def _box_width(box: BoundingBox) -> float:
+    return max(0.0, box.x1 - box.x0)
+
+
+def _horizontal_overlap_ratio(a: BoundingBox, b: BoundingBox) -> float:
+    overlap = max(0.0, min(a.x1, b.x1) - max(a.x0, b.x0))
+    return overlap / max(1.0, min(_box_width(a), _box_width(b)))
 
 
 def _is_footer_or_header_box(box: BoundingBox, layout: PageLayout, config: AppConfig) -> bool:
@@ -718,6 +930,7 @@ def _crop_diagnostics(
         "regions": [
             {
                 "page_number": region.page_number,
+                "region_kind": region.region_kind,
                 "original_crop_bbox": _box_payload(region.original_bbox or region.bbox),
                 "final_crop_bbox": {
                     "x0": round(region.bbox.x0, 2),
@@ -725,6 +938,10 @@ def _crop_diagnostics(
                     "x1": round(region.bbox.x1, 2),
                     "y1": round(region.bbox.y1, 2),
                 },
+                "text_bbox": _box_payload(region.text_bbox) if region.text_bbox else None,
+                "figure_bbox": _box_payload(region.figure_bbox) if region.figure_bbox else None,
+                "text_figure_overlap_area": round(region.text_figure_overlap_area, 2),
+                "text_trimmed_for_figure": region.text_trimmed_for_figure,
                 "merged_blocks": len(region.text_blocks),
                 "graphics_count": len(region.graphics),
                 "duplicate_visual_blocks_removed": region.duplicate_graphics_removed,
