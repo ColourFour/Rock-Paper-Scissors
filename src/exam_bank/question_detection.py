@@ -465,6 +465,10 @@ def _is_question_content_block(
         return False
     if _is_answer_space_text(text):
         return False
+    if _is_margin_furniture_text(block, page, config):
+        return False
+    if _is_control_artifact_text(text):
+        return False
     if answer_rule_bands and _is_in_answer_rule_band(block.bbox, answer_rule_bands):
         return False
 
@@ -496,6 +500,22 @@ def _is_answer_space_text(text: str) -> bool:
     if re.fullmatch(r"(?:\.\s*){6,}", text):
         return True
     return bool(re.search(r"\bAnswer\b\s*[._\-–—]{6,}", text, re.IGNORECASE))
+
+
+def _is_margin_furniture_text(block: TextBlock, page: PageLayout, config: AppConfig) -> bool:
+    text = _clean_text_line(block.text)
+    if re.search(r"DO NOT WRITE IN THIS MARGIN", text, re.IGNORECASE):
+        return True
+    narrow_edge = (block.bbox.x1 - block.bbox.x0) <= 70 and (
+        block.bbox.x0 <= config.detection.crop_left_margin or block.bbox.x1 >= page.width - config.detection.crop_right_margin
+    )
+    tall = (block.bbox.y1 - block.bbox.y0) >= 80
+    return narrow_edge and tall
+
+
+def _is_control_artifact_text(text: str) -> bool:
+    control_count = sum(1 for char in text if ord(char) < 32 and char not in "\n\t\r")
+    return control_count >= 2 or (control_count >= 1 and len(text.strip()) <= 6)
 
 
 def _answer_artifact_count(

@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from exam_bank.config import AppConfig
-from exam_bank.document_metadata import parse_filename_metadata
+from exam_bank.document_metadata import DocumentMetadata, parse_filename_metadata, reconcile_document_metadata
 from exam_bank.document_registry import build_document_registry
 from exam_bank import pipeline
 
@@ -41,6 +41,34 @@ def test_filename_metadata_normalizes_compact_and_phrase_sessions() -> None:
     assert compact.canonical_key == "9709_2021_MayJune_12"
     assert phrase.normalized_session_key == "OctNov"
     assert phrase.canonical_key == "9709_2025_OctNov_12"
+
+
+def test_reconcile_metadata_treats_november_and_octnov_as_compatible() -> None:
+    filename = DocumentMetadata(
+        syllabus="9709",
+        year="2025",
+        session="November",
+        original_session_label="November",
+        normalized_session_key="November",
+        document_type="question_paper",
+        component="12",
+        source="filename",
+    )
+    internal = DocumentMetadata(
+        syllabus="9709",
+        year="2025",
+        session="OctNov",
+        original_session_label="OctNov",
+        normalized_session_key="OctNov",
+        document_type="question_paper",
+        component="12",
+        source="internal",
+    )
+
+    reconciled = reconcile_document_metadata(filename, internal)
+
+    assert reconciled.session == "OctNov"
+    assert reconciled.warnings == ()
 
 
 def test_folder_registry_classifies_and_pairs_companion_files(tmp_path: Path) -> None:

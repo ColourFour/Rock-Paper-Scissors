@@ -4,7 +4,15 @@ from exam_bank.config import AppConfig
 from exam_bank.exporters import write_csv, write_json
 from exam_bank.identifiers import normalize_question_id
 from exam_bank.image_rendering import _detect_prompt_regions
-from exam_bank.mark_schemes import _detect_mark_scheme_tables, _detect_table_question_anchors, _parse_mark_scheme_question_cell, _table_regions_for_anchor, find_mark_scheme
+from exam_bank.mark_schemes import (
+    _detect_mark_scheme_tables,
+    _detect_table_question_anchors,
+    _mark_total_for_question_block,
+    _parse_mark_scheme_question_cell,
+    _table_regions_for_anchor,
+    _validate_mark_scheme_mapping,
+    find_mark_scheme,
+)
 from exam_bank.models import BoundingBox, PageLayout, QuestionRecord, TextBlock
 from exam_bank.question_detection import detect_question_spans, extract_marks_from_text, parse_question_start
 
@@ -157,6 +165,25 @@ def test_mark_scheme_table_detection_requires_answer_table_headers() -> None:
     assert _detect_mark_scheme_tables([layout], config) == {}
 
 
+def test_mark_scheme_header_requires_exact_marks_column() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=6,
+        width=595,
+        height=842,
+        blocks=[
+            cell(6, "Question", 100, x=45, width=55),
+            cell(6, "Answer", 100, x=130, width=50),
+            cell(6, "Mark", 100, x=390, width=45),
+            cell(6, "Guidance", 100, x=455, width=65),
+            cell(6, "1", 135, x=50, width=10),
+            cell(6, "x = 2", 135, x=130),
+        ],
+    )
+
+    assert _detect_mark_scheme_tables([layout], config) == {}
+
+
 def test_mark_scheme_subpart_matching_keeps_3a_and_3b_separate() -> None:
     config = AppConfig()
     layout = PageLayout(
@@ -190,6 +217,112 @@ def test_mark_scheme_subpart_matching_keeps_3a_and_3b_separate() -> None:
     assert region_a[0].bbox.y1 <= anchors[1].y0
     assert region_b[0].bbox.y0 < anchors[1].y0
     assert region_b[0].bbox.y1 <= anchors[2].y0
+
+
+def test_mark_scheme_full_parent_block_includes_all_subparts_and_marks() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=6,
+        width=595,
+        height=842,
+        blocks=[
+            cell(6, "Question", 100, x=45, width=55),
+            cell(6, "Answer", 100, x=130, width=50),
+            cell(6, "Marks", 100, x=390, width=45),
+            cell(6, "Guidance", 100, x=455, width=65),
+            cell(6, "5(a)", 135, x=50, width=35),
+            cell(6, "Part a answer", 135, x=130, width=100),
+            cell(6, "B1", 135, x=390, width=25),
+            cell(6, "5(b)", 170, x=50, width=35),
+            cell(6, "Part b answer", 170, x=130, width=100),
+            cell(6, "M1 A1", 170, x=390, width=45),
+            cell(6, "5(c)", 205, x=50, width=35),
+            cell(6, "Part c answer", 205, x=130, width=100),
+            cell(6, "B2", 205, x=390, width=25),
+            cell(6, "6", 250, x=50, width=10),
+            cell(6, "Next question", 250, x=130, width=100),
+        ],
+    )
+
+    tables = _detect_mark_scheme_tables([layout], config)
+    anchors = _detect_table_question_anchors([layout], tables, config, ["5", "6"])
+    regions, flags = _table_regions_for_anchor([layout], tables, anchors[0], anchors[-1], config)
+    mark_total = _mark_total_for_question_block([layout], anchors[0], anchors[-1], tables)
+    validation_flags, reason = _validate_mark_scheme_mapping(
+        "5",
+        ["a", "b", "c"],
+        ["a", "b", "c"],
+        5,
+        mark_total,
+        anchors[0],
+        anchors[-1],
+        regions,
+        flags,
+    )
+
+    assert mark_total == 5
+    assert not validation_flags
+    assert reason == ""
+    assert regions[0].bbox.y1 <= anchors[-1].y0
+
+
+def test_mark_scheme_mapping_rejects_missing_subpart_and_marks_mismatch() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=6,
+        width=595,
+        height=842,
+        blocks=[
+            cell(6, "Question", 100, x=45, width=55),
+            cell(6, "Answer", 100, x=130, width=50),
+            cell(6, "Marks", 100, x=390, width=45),
+            cell(6, "Guidance", 100, x=455, width=65),
+            cell(6, "5(a)", 135, x=50, width=35),
+            cell(6, "Part a answer", 135, x=130, width=100),
+            cell(6, "B1", 135, x=390, width=25),
+            cell(6, "5(b)", 170, x=50, width=35),
+            cell(6, "Part b answer", 170, x=130, width=100),
+            cell(6, "M1", 170, x=390, width=25),
+            cell(6, "6", 220, x=50, width=10),
+            cell(6, "Next question", 220, x=130, width=100),
+        ],
+    )
+
+    tables = _detect_mark_scheme_tables([layout], config)
+    anchors = _detect_table_question_anchors([layout], tables, config, ["5", "6"])
+    regions, flags = _table_regions_for_anchor([layout], tables, anchors[0], anchors[-1], config)
+    mark_total = _mark_total_for_question_block([layout], anchors[0], anchors[-1], tables)
+
+    validation_flags, reason = _validate_mark_scheme_mapping(
+        "5",
+        ["a", "b", "c"],
+        ["a", "b"],
+        5,
+        mark_total,
+        anchors[0],
+        anchors[-1],
+        regions,
+        flags,
+    )
+
+    assert mark_total == 2
+    assert validation_flags == ["missing_subparts"]
+    assert reason == "missing_subparts"
+
+    validation_flags, reason = _validate_mark_scheme_mapping(
+        "5",
+        ["a", "b"],
+        ["a", "b"],
+        5,
+        mark_total,
+        anchors[0],
+        anchors[-1],
+        regions,
+        flags,
+    )
+
+    assert validation_flags == ["marks_total_mismatch"]
+    assert reason == "marks_total_mismatch"
 
 
 def test_mark_scheme_table_detection_ignores_earlier_non_answer_table() -> None:
@@ -607,3 +740,55 @@ def test_prompt_crop_deduplicates_overlapping_visual_regions() -> None:
     assert "duplicate_visual_regions_removed" in flags
     assert sum(len(region.graphics) for region in regions) == 1
     assert sum(region.duplicate_graphics_removed for region in regions) == 2
+
+
+def test_prompt_crop_excludes_page_furniture_graphics_and_trims_edges() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "1 The diagram shows a curve. [3]", 110),
+            block(1, "Find the gradient at A.", 150),
+        ],
+        graphics=[
+            BoundingBox(500, 22, 570, 55),  # barcode-like top strip
+            BoundingBox(0, 90, 24, 730),  # side margin panel
+            BoundingBox(45, 230, 545, 231),  # answer line
+            BoundingBox(120, 175, 340, 270),  # actual diagram
+        ],
+    )
+    span = detect_question_spans([layout], Path("paper_qp.pdf"), config)[0]
+
+    regions, flags = _detect_prompt_regions(span, [layout], config)
+
+    assert {"barcode_excluded", "side_panel_excluded", "answer_lines_excluded"} <= set(flags)
+    assert len(regions) == 1
+    assert regions[0].bbox.x0 >= config.detection.crop_left_margin
+    assert regions[0].bbox.x1 <= layout.width - config.detection.crop_right_margin
+    assert [item["label"] for item in regions[0].excluded_regions] == ["barcode", "side_panel", "answer_lines"]
+
+
+def test_question_span_excludes_margin_text_and_control_artifacts() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "1 Find x. [2]", 100),
+            TextBlock(
+                page_number=1,
+                text="DO NOT WRITE IN THIS MARGIN",
+                bbox=BoundingBox(4, 120, 34, 520),
+            ),
+            block(1, ",\x01\x01\x01\x01", 180),
+            block(1, "2 Next question. [3]", 260),
+        ],
+    )
+
+    span = detect_question_spans([layout], Path("paper_qp.pdf"), config)[0]
+
+    assert "DO NOT WRITE" not in span.combined_text
+    assert "\x01" not in span.combined_text

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from exam_bank.config import AppConfig
 from exam_bank.examiner_reports import examiner_report_evidence, examiner_report_topic_evidence
 
@@ -30,6 +32,42 @@ Used integration by parts.
         tmp_path / "missing",
         "1",
         report_paths=[report],
+    )
+
+    assert "integration by parts" in evidence
+    assert "discriminant" not in evidence
+
+
+def test_examiner_report_evidence_reads_session_level_pdf(tmp_path: Path) -> None:
+    fitz = pytest.importorskip("fitz")
+    report = tmp_path / "9709 Mathematics November 2025 Examiner Report.pdf"
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text(
+        (72, 72),
+        """
+Paper 9709/12
+
+Comments on specific questions
+
+Question 1
+Used the discriminant of a quadratic.
+
+Paper 9709/32
+
+Comments on specific questions
+
+Question 1
+Used integration by parts.
+""",
+    )
+    doc.save(report)
+    doc.close()
+
+    evidence = examiner_report_evidence(
+        "9709 Mathematics November 2025 Question Paper 32.pdf",
+        tmp_path,
+        "1",
     )
 
     assert "integration by parts" in evidence

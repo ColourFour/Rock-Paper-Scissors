@@ -104,6 +104,11 @@ FAIL_FLAGS = {
     "markscheme_page_before_6",
     "markscheme_header_not_ok",
     "markscheme_label_missing",
+    "invalid_table_header",
+    "missing_subparts",
+    "marks_total_mismatch",
+    "partial_question_block",
+    "adjacent_question_block_selected",
 }
 FLAG_PRIORITY = [
     "record_incomplete",
@@ -317,12 +322,15 @@ def _check_question_image(
     if "turn over" in question_text or "header_footer_contamination" in _list_text(record.get("review_flags")):
         _add(flags, "possible_footer_in_question_crop")
         notes.append("question text metadata contains likely footer/header text")
-    if "additional page" in question_text or "excluded_boilerplate_additional_page" in _list_text(record.get("review_flags")):
+    if "do not write in this margin" in question_text:
+        _add(flags, "possible_margin_text_in_question_crop")
+        notes.append("question text metadata contains vertical margin text")
+    if "additional page" in question_text:
         _add(flags, "possible_additional_page_in_question_crop")
-        notes.append("question crop metadata contains an Additional Page boundary")
-    if "© ucles" in question_text or "copyright_footer" in " ".join(_list_text(record.get("review_flags"))).lower():
+        notes.append("question text contains likely Additional Page boilerplate")
+    if "© ucles" in question_text:
         _add(flags, "possible_copyright_in_question_crop")
-        notes.append("question crop metadata contains likely copyright/footer text")
+        notes.append("question text contains likely copyright/footer text")
 
 
 def _check_markscheme_image(
@@ -392,6 +400,11 @@ def _check_mapping_consistency(record: dict[str, Any], flags: list[str], notes: 
     if record.get("markscheme_image") and not markscheme_question_number:
         _add(flags, "markscheme_label_missing")
         notes.append("mark scheme crop does not include a matched label in metadata")
+    if _text(record.get("markscheme_mapping_status")) == "fail":
+        reason = _text(record.get("markscheme_failure_reason"))
+        if reason in {"invalid_table_header", "missing_subparts", "marks_total_mismatch", "partial_question_block", "adjacent_question_block_selected"}:
+            _add(flags, reason)
+            notes.append(f"mark scheme mapping failed: {reason}")
 
     paper_family = _text(record.get("paper_family"))
     source_paper_family = _text(record.get("source_paper_family"))
@@ -417,17 +430,13 @@ def _check_existing_review_flags(review_flags: list[str], flags: list[str], note
         _add(flags, "question_crop_suspicious")
     if {"header_footer_contamination"} & review_flag_set:
         _add(flags, "possible_footer_in_question_crop")
-    if {"excluded_boilerplate_additional_page"} & review_flag_set:
-        _add(flags, "possible_additional_page_in_question_crop")
-    if {"excluded_boilerplate_copyright_footer", "excluded_boilerplate_publisher_footer", "excluded_boilerplate_paper_code_footer"} & review_flag_set:
-        _add(flags, "possible_copyright_in_question_crop")
-        _add(flags, "possible_footer_in_question_crop")
-    if {"duplicate_visual_regions_removed"} & review_flag_set:
-        _add(flags, "duplicate_visual_regions_detected")
-        notes.append("duplicate visual regions were removed during crop rendering")
-    if {"answer_line_space_excluded"} & review_flag_set:
-        _add(flags, "possible_answer_line_space_in_question_crop")
-        notes.append("lined answer-space region was detected and excluded")
+    cleanup_flags = sorted(
+        flag
+        for flag in review_flag_set
+        if flag.endswith("_excluded") or flag.startswith("excluded_boilerplate_") or flag == "duplicate_visual_regions_removed"
+    )
+    if cleanup_flags:
+        notes.append(f"crop cleanup applied: {', '.join(cleanup_flags)}")
     if {"impossible_question_number_anchor_excluded"} & review_flag_set:
         _add(flags, "question_crop_suspicious")
         notes.append("an impossible question-number anchor was excluded from the crop span")
@@ -438,6 +447,9 @@ def _check_existing_review_flags(review_flags: list[str], flags: list[str], note
     if {"markscheme_answer_table_header_missing", "markscheme_table_detection_failed"} & review_flag_set:
         _add(flags, "markscheme_header_not_found")
         _add(flags, "possible_nonstandard_markscheme_table")
+    for reason in ["invalid_table_header", "missing_subparts", "marks_total_mismatch", "partial_question_block", "adjacent_question_block_selected"]:
+        if reason in review_flag_set:
+            _add(flags, reason)
     if review_flags:
         notes.append(f"source review flags: {', '.join(review_flags)}")
 

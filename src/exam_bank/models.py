@@ -183,6 +183,12 @@ class QuestionRecord:
     markscheme_debug_paths: list[str] = field(default_factory=list)
     markscheme_table_header_ok: bool = False
     markscheme_continuation_rows_included: bool = False
+    question_subparts: list[str] = field(default_factory=list)
+    markscheme_subparts: list[str] = field(default_factory=list)
+    question_marks_total: int | None = None
+    markscheme_marks_total: int | None = None
+    markscheme_mapping_status: str = ""
+    markscheme_failure_reason: str = ""
     qa_status: str = "pass"
     qa_flags: list[str] = field(default_factory=list)
 
@@ -250,12 +256,24 @@ class QuestionRecord:
             "markscheme_nearby_anchors": self.markscheme_nearby_anchors,
             "markscheme_debug_paths": self.markscheme_debug_paths,
             "markscheme_table_header_ok": self.markscheme_table_header_ok,
+            "question_subparts": self.question_subparts,
+            "markscheme_subparts": self.markscheme_subparts,
+            "question_marks_total": self.question_marks_total,
+            "markscheme_marks_total": self.markscheme_marks_total,
+            "markscheme_mapping_status": self.markscheme_mapping_status,
+            "markscheme_failure_reason": self.markscheme_failure_reason,
             "mark_scheme": {
                 "page": self.markscheme_pages[0] if self.markscheme_pages else None,
                 "table_header_ok": self.markscheme_table_header_ok,
                 "label_matched": self.markscheme_question_number,
                 "continuation_rows_included": self.markscheme_continuation_rows_included,
                 "crop_method": self.markscheme_mapping_method,
+                "detected_subparts_from_question_paper": self.question_subparts,
+                "detected_subparts_from_mark_scheme": self.markscheme_subparts,
+                "question_paper_total_marks": self.question_marks_total,
+                "mark_scheme_total_marks": self.markscheme_marks_total,
+                "mapping_status": self.markscheme_mapping_status,
+                "failure_reason": self.markscheme_failure_reason,
             },
             "qa": {
                 "status": self.qa_status,

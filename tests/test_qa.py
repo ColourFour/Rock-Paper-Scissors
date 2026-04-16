@@ -248,7 +248,12 @@ def test_qa_surfaces_question_crop_artifact_flags(tmp_path: Path) -> None:
                         "excluded_boilerplate_additional_page",
                         "excluded_boilerplate_copyright_footer",
                         "duplicate_visual_regions_removed",
+                        "duplicate_visual_fragment_excluded",
                         "answer_line_space_excluded",
+                        "answer_lines_excluded",
+                        "side_panel_excluded",
+                        "barcode_excluded",
+                        "scan_edge_excluded",
                     ],
                 }
             ]
@@ -259,8 +264,6 @@ def test_qa_surfaces_question_crop_artifact_flags(tmp_path: Path) -> None:
     result = run_qa(question_bank, tmp_path / "qa")
     flags = set(result.records[0]["qa_flags"])
 
-    assert result.records[0]["qa_status"] == "warning"
-    assert "possible_additional_page_in_question_crop" in flags
-    assert "possible_copyright_in_question_crop" in flags
-    assert "duplicate_visual_regions_detected" in flags
-    assert "possible_answer_line_space_in_question_crop" in flags
+    assert result.records[0]["qa_status"] == "pass"
+    assert not flags
+    assert any("crop cleanup applied" in note for note in result.records[0]["qa_notes"])

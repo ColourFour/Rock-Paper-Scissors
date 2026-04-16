@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import re
 
 from .classification import classify_question, classify_question_parts, infer_source_paper_code
 from .config import AppConfig
@@ -90,6 +91,8 @@ def build_records_for_pdf(
     document_metadata = reconcile_document_metadata(parsed_filename_metadata, internal_metadata)
     spans = detect_question_spans(layouts, question_pdf, config)
     expected_numbers = [span.question_number for span in spans if span.question_number.isdigit()]
+    expected_marks = {span.question_number: extract_marks_from_text(span.combined_text) for span in spans if span.question_number.isdigit()}
+    expected_subparts = {span.question_number: _question_subparts_from_text(span.combined_text) for span in spans if span.question_number.isdigit()}
 
     matched_mark_scheme = Path(mark_scheme_pdf) if mark_scheme_pdf else find_mark_scheme(
         question_pdf,
@@ -105,7 +108,13 @@ def build_records_for_pdf(
         except Exception as exc:
             mark_scheme_flags.append(f"mark_scheme_extract_failed:{exc.__class__.__name__}")
         try:
-            mark_scheme_images = render_mark_scheme_images(matched_mark_scheme, config, expected_numbers)
+            mark_scheme_images = render_mark_scheme_images(
+                matched_mark_scheme,
+                config,
+                expected_numbers,
+                question_marks=expected_marks,
+                question_subparts=expected_subparts,
+            )
         except Exception as exc:
             mark_scheme_flags.append(f"markscheme_image_export_failed:{exc.__class__.__name__}")
     else:
@@ -128,8 +137,8 @@ def build_records_for_pdf(
                 flags.append("markscheme_image_missing")
             elif mark_scheme_image.crop_confidence != "high":
                 flags.append("markscheme_image_uncertain")
-            if mark_scheme_image:
-                flags.extend(mark_scheme_image.review_flags)
+        if mark_scheme_image:
+            flags.extend(mark_scheme_image.review_flags)
 
         render_result = render_question_image(question_pdf, span, layouts, config)
         if not render_result.screenshot_path:
@@ -234,6 +243,12 @@ def build_records_for_pdf(
                 markscheme_debug_paths=mark_scheme_image.debug_paths if mark_scheme_image else [],
                 markscheme_table_header_ok=mark_scheme_image.table_header_ok if mark_scheme_image else False,
                 markscheme_continuation_rows_included=mark_scheme_image.continuation_rows_included if mark_scheme_image else False,
+                question_subparts=mark_scheme_image.question_subparts if mark_scheme_image else expected_subparts.get(span.question_number, []),
+                markscheme_subparts=mark_scheme_image.markscheme_subparts if mark_scheme_image else [],
+                question_marks_total=mark_scheme_image.question_marks_total if mark_scheme_image else expected_marks.get(span.question_number),
+                markscheme_marks_total=mark_scheme_image.markscheme_marks_total if mark_scheme_image else None,
+                markscheme_mapping_status=mark_scheme_image.mapping_status if mark_scheme_image else "fail",
+                markscheme_failure_reason=mark_scheme_image.failure_reason if mark_scheme_image else "partial_question_block",
                 qa_status="fail" if any(flag.startswith("qa_fail_") for flag in qa_flags) else ("warning" if qa_flags else "pass"),
                 qa_flags=qa_flags,
             )
@@ -264,7 +279,18 @@ def _record_qa_flags(
             flags.append("qa_warn_markscheme_continuation_maybe_truncated")
         if "markscheme_parent_label_match" in mark_scheme_image.review_flags:
             flags.append("qa_warn_markscheme_parent_label_match")
+        if mark_scheme_image.mapping_status == "fail":
+            flags.append(f"qa_fail_markscheme_{mark_scheme_image.failure_reason or 'mapping_failed'}")
     return sorted(set(flags))
+
+
+def _question_subparts_from_text(text: str) -> list[str]:
+    subparts: list[str] = []
+    for match in re.finditer(r"(?<![A-Za-z])\(([a-h])\)", text, re.IGNORECASE):
+        label = match.group(1).lower()
+        if label not in subparts:
+            subparts.append(label)
+    return subparts
 
 
 def _record_confidence(classification_confidence: float, flags: list[str]) -> float:

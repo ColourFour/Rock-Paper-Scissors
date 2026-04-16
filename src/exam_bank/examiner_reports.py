@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 import json
 import re
 from pathlib import Path
@@ -10,6 +11,7 @@ from .classification import _score_topic_candidates_from_sources, infer_source_p
 from .config import AppConfig
 from .document_metadata import companion_candidates, parse_filename_metadata
 from .identifiers import normalize_question_id, parent_question_id
+from .mupdf_tools import quiet_mupdf
 
 
 MATH_CUE_PATTERNS = {
@@ -119,6 +121,10 @@ def examiner_report_evidence(
             evidence = _report_evidence(path, wanted, parent, paper_code)
             if evidence:
                 return evidence
+    for path in _session_report_paths(reports_dir, metadata.session_key):
+        evidence = _report_evidence(path, wanted, parent, paper_code)
+        if evidence:
+            return evidence
     keys = _candidate_keys(source_pdf, paper_code)
 
     for path in _candidate_report_paths(reports_dir, keys):
@@ -158,7 +164,7 @@ def examiner_report_topic_evidence(
 
 
 def _explicit_report_paths(paths: list[Path]) -> list[Path]:
-    return [path for path in paths if path.suffix.lower() in {".txt", ".json"} and path.exists()]
+    return [path for path in paths if path.suffix.lower() in {".txt", ".json", ".pdf"} and path.exists()]
 
 
 def _report_evidence(path: Path, wanted: str, parent: str, paper_code: str) -> str:
@@ -178,10 +184,23 @@ def _candidate_keys(source_pdf: Path, paper_code: str) -> list[str]:
 def _candidate_report_paths(reports_dir: Path, keys: list[str]) -> list[Path]:
     candidates: list[Path] = []
     for path in sorted(reports_dir.glob("*")):
-        if path.suffix.lower() not in {".txt", ".json"}:
+        if path.suffix.lower() not in {".txt", ".json", ".pdf"}:
             continue
         lowered = path.stem.lower()
         if any(key in lowered for key in keys):
+            candidates.append(path)
+    return candidates
+
+
+def _session_report_paths(reports_dir: Path, session_key: str) -> list[Path]:
+    if not session_key:
+        return []
+    candidates: list[Path] = []
+    for path in sorted(reports_dir.glob("*")):
+        if path.suffix.lower() not in {".txt", ".json", ".pdf"}:
+            continue
+        metadata = parse_filename_metadata(path)
+        if metadata.document_type == "examiner_report" and metadata.session_key == session_key:
             candidates.append(path)
     return candidates
 
@@ -323,7 +342,42 @@ def _shorten(value: str, limit: int = 180) -> str:
 
 
 def _text_report_evidence(path: Path, wanted: str, parent: str, paper_code: str = "") -> str:
-    text = path.read_text(encoding="utf-8", errors="ignore")
+    text = _report_text(path)
+    if not text:
+        return ""
+    return _text_report_evidence_from_text(text, wanted, parent, paper_code)
+
+
+@lru_cache(maxsize=48)
+def _report_text_cached(path_value: str) -> str:
+    path = Path(path_value)
+    if path.suffix.lower() == ".pdf":
+        return _pdf_report_text(path)
+    return path.read_text(encoding="utf-8", errors="ignore")
+
+
+def _report_text(path: Path) -> str:
+    try:
+        return _report_text_cached(str(path.resolve()))
+    except Exception:
+        return ""
+
+
+def _pdf_report_text(path: Path) -> str:
+    try:
+        import fitz
+    except ImportError:
+        return ""
+    quiet_mupdf(fitz)
+
+    pages: list[str] = []
+    with fitz.open(path) as doc:
+        for page in doc:
+            pages.append(page.get_text("text"))
+    return "\n".join(pages)
+
+
+def _text_report_evidence_from_text(text: str, wanted: str, parent: str, paper_code: str = "") -> str:
     text = _paper_section_text(text, paper_code)
     text = _comments_on_specific_questions_text(text)
     if not text:

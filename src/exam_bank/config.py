@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, is_dataclass
 from pathlib import Path
 from typing import Any
 
@@ -939,6 +939,36 @@ class TopicPDFConfig:
 
 
 @dataclass
+class BugReportConfig:
+    enabled: bool = True
+    form_url: str = ""
+    open_in_new_tab: bool = True
+    enable_copy_button: bool = True
+    form_field_names: dict[str, str] = field(
+        default_factory=lambda: {
+            "paper": "paper",
+            "topic": "topic",
+            "question_number": "question_number",
+            "marks": "marks",
+            "source_pdf": "source_pdf",
+            "question_image": "question_image",
+            "markscheme_image": "markscheme_image",
+            "report_text": "report_text",
+        }
+    )
+
+
+@dataclass
+class PracticePageConfig:
+    publish_enabled: bool = True
+    publish_dir: Path = Path("practice")
+    publish_assets: bool = True
+    publish_asset_dir: str = "assets"
+    github_pages_url: str = ""
+    bug_report: BugReportConfig = field(default_factory=BugReportConfig)
+
+
+@dataclass
 class DebugConfig:
     enabled: bool = False
     save_rendered_pages: bool = True
@@ -979,6 +1009,7 @@ class AppConfig:
     naming: NamingConfig = field(default_factory=NamingConfig)
     classification: ClassificationConfig = field(default_factory=ClassificationConfig)
     topic_pdfs: TopicPDFConfig = field(default_factory=TopicPDFConfig)
+    practice_page: PracticePageConfig = field(default_factory=PracticePageConfig)
     debug: DebugConfig = field(default_factory=DebugConfig)
 
     def ensure_output_dirs(self) -> None:
@@ -1085,6 +1116,12 @@ def validate_config(config: AppConfig) -> None:
         raise ValueError("topic_pdfs.section_heading_font_size must be positive.")
     if config.topic_pdfs.topic_title_font_size <= 0:
         raise ValueError("topic_pdfs.topic_title_font_size must be positive.")
+    if not isinstance(config.practice_page.bug_report.form_field_names, dict):
+        raise ValueError("practice_page.bug_report.form_field_names must be a mapping.")
+    if not all(isinstance(key, str) and isinstance(value, str) for key, value in config.practice_page.bug_report.form_field_names.items()):
+        raise ValueError("practice_page.bug_report.form_field_names keys and values must be strings.")
+    if not config.practice_page.publish_asset_dir.strip():
+        raise ValueError("practice_page.publish_asset_dir must be non-empty.")
 
 
 def _validate_hint_groups(hints: Any, location: str) -> None:
@@ -1099,7 +1136,7 @@ def _validate_hint_groups(hints: Any, location: str) -> None:
 
 def _apply_mapping(config: AppConfig, raw: dict[str, Any]) -> None:
     for key, value in raw.items():
-        if key in {"input", "output", "detection", "ocr", "naming", "classification", "topic_pdfs", "debug"}:
+        if key in {"input", "output", "detection", "ocr", "naming", "classification", "topic_pdfs", "practice_page", "debug"}:
             target = getattr(config, key)
             if not isinstance(value, dict):
                 raise ValueError(f"Config section `{key}` must be a mapping.")
@@ -1129,6 +1166,14 @@ def _set_dataclass_fields(target: object, values: dict[str, Any], path_fields: b
     for key, value in values.items():
         if key not in valid:
             raise ValueError(f"Unknown config key `{key}` in {target.__class__.__name__}.")
+        current = getattr(target, key)
+        if is_dataclass(current) and isinstance(value, dict):
+            _set_dataclass_fields(current, value, path_fields=False)
+            continue
+        if isinstance(current, Path):
+            value = Path(value)
+            setattr(target, key, value)
+            continue
         if path_fields:
             value = Path(value)
         setattr(target, key, value)

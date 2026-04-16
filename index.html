@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Cambridge 9709 Practice</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --background: #f7f8f4;
+        --ink: #18201a;
+        --muted: #58625b;
+        --accent: #24735a;
+        --line: #cbd4cc;
+        --surface: #ffffff;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--background);
+        color: var(--ink);
+        font-family: Arial, Helvetica, sans-serif;
+        line-height: 1.5;
+      }
+
+      main {
+        width: min(840px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 48px 0;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: clamp(32px, 6vw, 56px);
+        line-height: 1.05;
+        letter-spacing: 0;
+      }
+
+      p {
+        max-width: 680px;
+        margin: 0 0 18px;
+        color: var(--muted);
+        font-size: 18px;
+      }
+
+      a.button {
+        display: inline-block;
+        min-height: 42px;
+        border: 1px solid var(--accent);
+        border-radius: 8px;
+        background: var(--accent);
+        color: #ffffff;
+        font-weight: 700;
+        padding: 10px 16px;
+        text-decoration: none;
+      }
+
+      a.button:hover {
+        background: #1b5845;
+      }
+
+      .note {
+        margin-top: 28px;
+        border-top: 1px solid var(--line);
+        padding-top: 16px;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Cambridge 9709 Practice</h1>
+      <p>Choose a paper and topic, get a random question, then reveal the mapped mark scheme when you are ready.</p>
+      <p><a class="button" href="practice/">Open the practice page</a></p>
+      <p class="note">The practice page is fully static and can be shared through GitHub Pages.</p>
+    </main>
+  </body>
+</html>

@@ -19,6 +19,8 @@ config.yaml
 requirements.txt
 src/exam_bank/
 tests/
+index.html
+practice/       # generated GitHub Pages export
 input/
   question_papers/
   mark_schemes/
@@ -248,13 +250,21 @@ To point it at another export:
 python -m exam_bank.cli practice-page --config config.yaml --question-bank output/json/question_bank.json
 ```
 
-This writes:
+This writes a local test page and a publishable GitHub Pages copy:
 
 ```text
 output/practice/index.html
+practice/index.html
+practice/assets/
 ```
 
-Open that file directly from Finder or your browser. It does not fetch local JSON and does not need a local server. The generated HTML embeds a small usable record set with these fields:
+Open the local file directly from Finder or your browser:
+
+```bash
+open output/practice/index.html
+```
+
+It does not fetch local JSON and does not need a local server. The generated HTML embeds a small usable record set with these fields:
 
 ```text
 source_pdf
@@ -264,9 +274,109 @@ question_number
 marks_if_available
 question_image
 markscheme_image
+full_question_label / question_label
+session
+year
+component
+source page number
+mark scheme page number
+qa status / warnings
 ```
 
 The page lets a student choose a paper family and topic, get a random matching question image, and reveal the mapped mark scheme image.
+
+The publishable copy in `practice/` also copies the referenced question and mark scheme images into `practice/assets/`, so the page works from GitHub Pages instead of depending on ignored `output/` files.
+
+### GitHub Pages Sharing
+
+`output/practice/index.html` is ignored by git and is not published. The shareable page is exported to:
+
+```text
+practice/index.html
+```
+
+The repository root page links to `practice/`, and the GitHub Pages workflow deploys `index.html` plus the generated `practice/` directory. After running the generator, commit and push the updated `practice/` folder:
+
+```bash
+python -m exam_bank.cli practice-page --config config.yaml
+git add index.html practice .github/workflows/pages.yml .nojekyll
+git commit -m "Publish practice page"
+git push
+```
+
+For this repository, the colleague-facing URL is:
+
+```text
+https://colourfour.github.io/Rock-Paper-Scissors/practice/
+```
+
+The root project page is:
+
+```text
+https://colourfour.github.io/Rock-Paper-Scissors/
+```
+
+If GitHub Pages is not enabled yet, enable it in the repository settings using GitHub Actions as the source. The included workflow deploys on pushes to `main`.
+
+### Sharing and Bug Reports
+
+The practice page can collect lightweight structured feedback without a backend. It uses an external form as the primary path and a clipboard template as the fallback path:
+
+- `Report a problem` opens your configured form in a new tab and appends the current question metadata as query parameters.
+- `Copy bug report` copies a clean template that colleagues can paste into email, Slack, Teams, or a form.
+
+Configure this in `config.yaml`:
+
+```yaml
+practice_page:
+  publish_enabled: true
+  publish_dir: practice
+  publish_assets: true
+  publish_asset_dir: assets
+  github_pages_url: "https://colourfour.github.io/Rock-Paper-Scissors/"
+  bug_report:
+    enabled: true
+    form_url: "https://forms.example.com/your-form"
+    open_in_new_tab: true
+    enable_copy_button: true
+    form_field_names:
+      paper: paper
+      topic: topic
+      question_number: question_number
+      marks: marks
+      source_pdf: source_pdf
+      question_image: question_image
+      markscheme_image: markscheme_image
+      report_text: report_text
+```
+
+If `form_url` is blank, the page hides `Report a problem` and still shows `Copy bug report` when `enable_copy_button` is true.
+
+The copied report includes:
+
+```text
+Issue type
+Description
+Expected result
+Actual result
+Paper
+Topic
+Question number
+Marks
+Source PDF
+Question image path
+Mark scheme image path
+Question label
+Question id
+Session/year
+Component
+Source page number
+Mark scheme page number
+QA status / warnings
+Topic assigned by pipeline
+```
+
+For Google Forms, create a prefilled link and copy the `entry.xxxxx` field names into `form_field_names`. For Microsoft Forms or another form tool, use the query parameter names that tool expects. If the form ignores query parameters, the form still opens and colleagues can use `Copy bug report` to paste the metadata manually.
 
 ## Output Schema
 
@@ -339,6 +449,7 @@ Edit `config.yaml` to tune:
 - file naming
 - optional OpenAI classification
 - topic PDF export layout
+- static practice page bug-report buttons
 - debug crop overlays
 
 The only valid difficulty labels are:
@@ -378,7 +489,7 @@ For grouped multi-part questions, the default exported `topic` is the single fin
 
 Difficulty is also paper-aware. It combines marks, number of linked parts, symbolic density, routine versus disguised wording, cross-topic mixing, and the selected paper family's difficulty heuristics. The output includes `difficulty`, `difficulty_confidence`, `difficulty_evidence`, and `difficulty_uncertain`.
 
-Mark scheme images are cropped from the rendered mark scheme PDF using the CAIE answer table only. A table is accepted for normal mapping only when the header row contains all four headers: `Question`, `Answer`, `Marks`, and `Guidance`. Rubric, rules, and notes tables are ignored. The mapper finds the matching question number in the Question column, crops the full table row block until the next visible question number, and treats blank Question cells below an anchor as continuation rows. If no valid four-header table is found, it falls back to local text-box grouping with `markscheme_mapping_method: fallback_nonstandard_table` and low confidence.
+Mark scheme images are cropped from the rendered mark scheme PDF using the CAIE answer table only. A table is accepted only when the header row contains all four headers: `Question`, `Answer`, `Marks`, and `Guidance`. Rubric, rules, notes tables, and nonstandard tables are rejected. The mapper finds the matching question number in the Question column, crops the full table row block until the next visible question number, includes same-question subparts and continuation rows, and requires the mark-scheme total to match the question-paper marks exactly. If the strict checks fail, the record is flagged and no mark scheme image is exposed to the student page.
 
 By default, `detection.output_mode` is `prompt_only`. This renders the original PDF page, detects the prompt text/mark bounds, crops the rendered PDF pixels, and stitches only prompt regions together. It does not OCR-typeset or reconstruct the question image.
 
@@ -414,6 +525,31 @@ topic_pdfs:
   caption_font_size: 8
   section_heading_font_size: 15
   topic_title_font_size: 22
+```
+
+Practice page publishing and reporting can be tuned in `config.yaml`:
+
+```yaml
+practice_page:
+  publish_enabled: true
+  publish_dir: practice
+  publish_assets: true
+  publish_asset_dir: assets
+  github_pages_url: "https://colourfour.github.io/Rock-Paper-Scissors/"
+  bug_report:
+    enabled: true
+    form_url: ""
+    open_in_new_tab: true
+    enable_copy_button: true
+    form_field_names:
+      paper: paper
+      topic: topic
+      question_number: question_number
+      marks: marks
+      source_pdf: source_pdf
+      question_image: question_image
+      markscheme_image: markscheme_image
+      report_text: report_text
 ```
 
 ## Optional OpenAI Classification

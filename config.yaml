@@ -175,6 +175,27 @@ topic_pdfs:
   section_heading_font_size: 15
   topic_title_font_size: 22
 
+practice_page:
+  publish_enabled: true
+  publish_dir: practice
+  publish_assets: true
+  publish_asset_dir: assets
+  github_pages_url: "https://colourfour.github.io/Rock-Paper-Scissors/"
+  bug_report:
+    enabled: true
+    form_url: ""
+    open_in_new_tab: true
+    enable_copy_button: true
+    form_field_names:
+      paper: paper
+      topic: topic
+      question_number: question_number
+      marks: marks
+      source_pdf: source_pdf
+      question_image: question_image
+      markscheme_image: markscheme_image
+      report_text: report_text
+
 debug:
   enabled: false
   save_rendered_pages: true

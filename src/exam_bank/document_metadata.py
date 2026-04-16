@@ -194,7 +194,12 @@ def reconcile_document_metadata(filename: DocumentMetadata, internal: DocumentMe
     def choose(field: str) -> str:
         filename_value = getattr(filename, field)
         internal_value = getattr(internal, field)
-        if internal_value and filename_value and internal_value != filename_value:
+        if (
+            internal_value
+            and filename_value
+            and internal_value != filename_value
+            and not _metadata_values_equivalent(field, filename_value, internal_value)
+        ):
             warnings.append(f"metadata_mismatch_{field}:filename={filename_value}:internal={internal_value}")
         return internal_value or filename_value
 
@@ -210,6 +215,20 @@ def reconcile_document_metadata(filename: DocumentMetadata, internal: DocumentMe
         source="internal" if any(getattr(internal, field) for field in ["syllabus", "year", "session", "document_type", "component"]) else "filename",
         warnings=tuple(warnings),
     )
+
+
+def _metadata_values_equivalent(field: str, filename_value: str, internal_value: str) -> bool:
+    if field not in {"session", "original_session_label", "normalized_session_key"}:
+        return False
+    return _session_compare_key(filename_value) == _session_compare_key(internal_value)
+
+
+def _session_compare_key(value: str) -> str:
+    if value in {"October", "November", "OctNov"}:
+        return "OctNov"
+    if value in {"May", "June", "MayJune"}:
+        return "MayJune"
+    return value
 
 
 def companion_candidates(document: DocumentMetadata, directory: str | Path, document_type: str) -> list[Path]:

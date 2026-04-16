@@ -74,6 +74,8 @@ def main(argv: list[str] | None = None) -> int:
     practice_page.add_argument("--config", default="config.yaml", help="Path to config.yaml.")
     practice_page.add_argument("--question-bank", help="Path to a question_bank.json file. Defaults to output/json/question_bank.json.")
     practice_page.add_argument("--output-dir", help="Output directory. Defaults to output/practice.")
+    practice_page.add_argument("--publish-dir", help="GitHub Pages export directory. Defaults to practice_page.publish_dir.")
+    practice_page.add_argument("--no-publish", action="store_true", help="Only write the local output/practice page; skip the GitHub Pages export.")
     practice_page.set_defaults(func=cmd_practice_page)
 
     open_qa = subparsers.add_parser("open-qa", help="Open output/qa/review.html. No local server is needed for the generated QA page.")
@@ -201,12 +203,36 @@ def cmd_practice_page(args: argparse.Namespace) -> int:
         )
         return 1
     output_dir = Path(args.output_dir) if args.output_dir else config.output.json_dir.parent / "practice"
-    result = build_practice_page(question_bank, output_dir)
+    result = build_practice_page(question_bank, output_dir, config.practice_page)
     print(f"Practice records: {result.usable_records}")
     if result.skipped_records:
         print(f"Practice skipped records: {result.skipped_records}")
     print(f"Practice page: {result.html_path}")
-    print("Open it directly with `open output/practice/index.html`; no local server is needed.")
+    bug_report = config.practice_page.bug_report
+    if bug_report.enabled:
+        print(f"Bug report form: {'configured' if bug_report.form_url else 'not configured'}")
+        print(f"Copy bug report button: {'enabled' if bug_report.enable_copy_button else 'disabled'}")
+    print(f"Open it directly with `open {result.html_path}`; no local server is needed.")
+
+    if config.practice_page.publish_enabled and not args.no_publish:
+        publish_dir = Path(args.publish_dir) if args.publish_dir else config.practice_page.publish_dir
+        publish_result = build_practice_page(
+            question_bank,
+            publish_dir,
+            config.practice_page,
+            copy_assets=config.practice_page.publish_assets,
+            asset_dir_name=config.practice_page.publish_asset_dir,
+        )
+        print(f"Published practice page: {publish_result.html_path}")
+        if config.practice_page.publish_assets:
+            print(f"Published practice assets copied: {publish_result.copied_assets}")
+            if publish_result.missing_assets:
+                print(f"Published practice assets missing at generation time: {publish_result.missing_assets}")
+        share_url = _practice_share_url(config.practice_page.github_pages_url, publish_result.html_path)
+        if share_url:
+            print(f"Shareable GitHub Pages URL after push/deploy: {share_url}")
+        else:
+            print("Shareable GitHub Pages URL: set practice_page.github_pages_url in config.yaml to print this exactly.")
     return 0
 
 
@@ -284,6 +310,58 @@ def _open_path(path: Path, label: str) -> int:
         webbrowser.open(path.resolve().as_uri())
     print(f"Opened {label}: {path}")
     return 0
+
+
+def _practice_share_url(configured_base_url: str, html_path: Path) -> str:
+    base_url = configured_base_url.strip() or _infer_github_pages_base_url()
+    if not base_url:
+        return ""
+    base_url = base_url.rstrip("/") + "/"
+    relative = _index_url_path(html_path)
+    return base_url + relative
+
+
+def _index_url_path(html_path: Path) -> str:
+    try:
+        relative = html_path.resolve().relative_to(Path.cwd().resolve())
+    except ValueError:
+        relative = html_path
+    if relative.name == "index.html":
+        relative = relative.parent
+    path = relative.as_posix().strip("/")
+    return f"{path}/" if path else ""
+
+
+def _infer_github_pages_base_url() -> str:
+    try:
+        completed = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return ""
+    remote = completed.stdout.strip()
+    if not remote:
+        return ""
+    owner = repo = ""
+    if remote.startswith("git@github.com:"):
+        owner_repo = remote.removeprefix("git@github.com:").removesuffix(".git")
+        parts = owner_repo.split("/", 1)
+        if len(parts) == 2:
+            owner, repo = parts
+    elif "github.com/" in remote:
+        owner_repo = remote.split("github.com/", 1)[1].removesuffix(".git")
+        parts = owner_repo.split("/", 1)
+        if len(parts) == 2:
+            owner, repo = parts
+    if not owner or not repo:
+        return ""
+    owner_host = owner.lower()
+    if repo.lower() == f"{owner_host}.github.io":
+        return f"https://{owner_host}.github.io/"
+    return f"https://{owner_host}.github.io/{repo}/"
 
 
 if __name__ == "__main__":

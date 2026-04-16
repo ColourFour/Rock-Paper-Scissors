@@ -19,6 +19,8 @@ class CropRegion:
     text_blocks: list[TextBlock] = field(default_factory=list)
     graphics: list[BoundingBox] = field(default_factory=list)
     duplicate_graphics_removed: int = 0
+    original_bbox: BoundingBox | None = None
+    excluded_regions: list[dict[str, object]] = field(default_factory=list)
 
 
 def render_question_image(
@@ -156,13 +158,19 @@ def _detect_prompt_regions(
 
         for segment in segments:
             text_box = _union_boxes([block.bbox for block in segment])
-            raw_graphics = _graphics_for_segment(text_box, layout, config)
+            raw_graphics, excluded_regions = _graphics_for_segment(text_box, layout, config)
+            for excluded in excluded_regions:
+                reason = str(excluded.get("label") or "")
+                if reason:
+                    flags.append(f"{reason}_excluded")
             graphics, duplicate_count = _dedupe_graphics(raw_graphics, seen_graphics.setdefault(page_number, []))
             if duplicate_count:
                 flags.append("duplicate_visual_regions_removed")
+                flags.append("duplicate_visual_fragment_excluded")
             boxes = [text_box] + graphics
-            crop_box = _union_boxes(boxes).padded(config.detection.crop_padding, layout.width, layout.height)
-            crop_box = _clamp_crop_to_prompt_area(crop_box, layout, config)
+            original_box = _union_boxes(boxes).padded(config.detection.crop_padding, layout.width, layout.height)
+            crop_box = _clamp_crop_to_prompt_area(original_box, layout, config)
+            crop_box = _trim_crop_furniture_edges(crop_box, layout, config)
             if _box_height(crop_box) < config.detection.min_crop_height:
                 flags.append("crop_uncertain")
             regions.append(
@@ -172,6 +180,8 @@ def _detect_prompt_regions(
                     text_blocks=segment,
                     graphics=graphics,
                     duplicate_graphics_removed=duplicate_count,
+                    original_bbox=original_box,
+                    excluded_regions=excluded_regions,
                 )
             )
 
@@ -195,15 +205,16 @@ def _split_prompt_segments(blocks: list[TextBlock], config: AppConfig) -> list[l
     return segments
 
 
-def _graphics_for_segment(text_box: BoundingBox, layout: PageLayout, config: AppConfig) -> list[BoundingBox]:
+def _graphics_for_segment(text_box: BoundingBox, layout: PageLayout, config: AppConfig) -> tuple[list[BoundingBox], list[dict[str, object]]]:
     graphics: list[BoundingBox] = []
+    excluded_regions: list[dict[str, object]] = []
     top = text_box.y0 - config.detection.prompt_graphic_overlap_padding
     bottom = text_box.y1 + config.detection.prompt_graphic_lookahead
     answer_rule_bands = _answer_rule_y_bands(layout)
     for graphic in layout.graphics:
-        if _is_footer_or_header_box(graphic, layout, config):
-            continue
-        if _is_answer_rule_like(graphic, layout) or _is_in_answer_rule_band(graphic, answer_rule_bands):
+        furniture_label = _page_furniture_box_label(graphic, layout, config, answer_rule_bands)
+        if furniture_label:
+            excluded_regions.append(_excluded_region(furniture_label, graphic))
             continue
         overlaps_vertically = graphic.y1 >= top and graphic.y0 <= bottom
         overlaps_horizontally = graphic.x1 >= text_box.x0 - 30 and graphic.x0 <= text_box.x1 + 30
@@ -212,7 +223,7 @@ def _graphics_for_segment(text_box: BoundingBox, layout: PageLayout, config: App
         significant_nearby_graphic = graphic_width >= 20 and graphic_height >= 20
         if overlaps_vertically and (overlaps_horizontally or significant_nearby_graphic):
             graphics.append(graphic)
-    return graphics
+    return graphics, excluded_regions
 
 
 def _is_prompt_text_block(block: TextBlock, span: QuestionSpan, layout: PageLayout, config: AppConfig) -> bool:
@@ -224,6 +235,10 @@ def _is_prompt_text_block(block: TextBlock, span: QuestionSpan, layout: PageLayo
     if _is_boilerplate_text(text):
         return False
     if _is_answer_space_text(text):
+        return False
+    if _is_margin_furniture_text(block, layout, config):
+        return False
+    if _is_control_artifact_text(text):
         return False
 
     parsed = parse_question_start(text, config)
@@ -417,10 +432,12 @@ def _write_crop_metadata(span: QuestionSpan, regions: list[CropRegion], flags: l
                     "x1": round(region.bbox.x1, 2),
                     "y1": round(region.bbox.y1, 2),
                 },
+                "original_bbox_pdf_points": _box_payload(region.original_bbox or region.bbox),
                 "text_blocks": [block.text for block in region.text_blocks],
                 "merged_blocks": len(region.text_blocks),
                 "graphics_count": len(region.graphics),
                 "duplicate_graphics_removed": region.duplicate_graphics_removed,
+                "excluded_regions": region.excluded_regions,
             }
             for region in regions
         ],
@@ -477,6 +494,15 @@ def _clamp_crop_to_prompt_area(box: BoundingBox, layout: PageLayout, config: App
     )
 
 
+def _trim_crop_furniture_edges(box: BoundingBox, layout: PageLayout, config: AppConfig) -> BoundingBox:
+    return BoundingBox(
+        max(box.x0, config.detection.crop_left_margin),
+        box.y0,
+        min(box.x1, layout.width - config.detection.crop_right_margin),
+        box.y1,
+    )
+
+
 def _union_boxes(boxes: list[BoundingBox]) -> BoundingBox:
     return BoundingBox(
         min(box.x0 for box in boxes),
@@ -501,6 +527,10 @@ def _dedupe_graphics(boxes: list[BoundingBox], seen: list[BoundingBox]) -> tuple
 def _boxes_duplicate(a: BoundingBox, b: BoundingBox) -> bool:
     if _intersection_area(a, b) / max(1.0, min(_box_area(a), _box_area(b))) >= 0.88:
         return True
+    smaller = min(_box_area(a), _box_area(b))
+    larger = max(_box_area(a), _box_area(b))
+    if smaller > 0 and smaller <= larger * 0.35 and _intersection_area(a, b) / smaller >= 0.65:
+        return True
     return (
         abs(a.x0 - b.x0) <= 3
         and abs(a.y0 - b.y0) <= 3
@@ -521,6 +551,46 @@ def _box_area(box: BoundingBox) -> float:
 
 def _is_footer_or_header_box(box: BoundingBox, layout: PageLayout, config: AppConfig) -> bool:
     return box.y1 < config.detection.crop_top_margin or box.y0 > layout.height - config.detection.bottom_margin
+
+
+def _page_furniture_box_label(
+    box: BoundingBox,
+    layout: PageLayout,
+    config: AppConfig,
+    answer_rule_bands: list[float],
+) -> str | None:
+    if _is_footer_or_header_box(box, layout, config):
+        return "header_footer"
+    if _is_answer_rule_like(box, layout) or _is_in_answer_rule_band(box, answer_rule_bands):
+        return "answer_lines"
+    if _is_side_panel_box(box, layout, config):
+        return "side_panel"
+    if _is_barcode_like_box(box, layout, config):
+        return "barcode"
+    if _is_scan_edge_box(box, layout):
+        return "scan_edge"
+    return None
+
+
+def _is_side_panel_box(box: BoundingBox, layout: PageLayout, config: AppConfig) -> bool:
+    width = max(0.0, box.x1 - box.x0)
+    height = max(0.0, box.y1 - box.y0)
+    near_left = box.x0 <= config.detection.crop_left_margin * 0.8
+    near_right = box.x1 >= layout.width - config.detection.crop_right_margin * 0.8
+    return width <= 55 and height >= layout.height * 0.16 and (near_left or near_right)
+
+
+def _is_barcode_like_box(box: BoundingBox, layout: PageLayout, config: AppConfig) -> bool:
+    width = max(0.0, box.x1 - box.x0)
+    height = max(0.0, box.y1 - box.y0)
+    return box.y0 <= config.detection.crop_top_margin + 70 and height <= 90 and 20 <= width <= layout.width * 0.45
+
+
+def _is_scan_edge_box(box: BoundingBox, layout: PageLayout) -> bool:
+    width = max(0.0, box.x1 - box.x0)
+    height = max(0.0, box.y1 - box.y0)
+    near_edge = box.x0 <= 4 or box.x1 >= layout.width - 4 or box.y0 <= 4 or box.y1 >= layout.height - 4
+    return near_edge and (width <= 8 or height <= 8)
 
 
 def _is_answer_rule_like(box: BoundingBox, layout: PageLayout) -> bool:
@@ -572,6 +642,24 @@ def _is_boilerplate_text(text: str) -> bool:
         r"^Turn over$",
     ]
     return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
+
+
+def _is_margin_furniture_text(block: TextBlock, layout: PageLayout, config: AppConfig) -> bool:
+    text = _clean_text_line(block.text)
+    if re.search(r"DO NOT WRITE IN THIS MARGIN", text, re.IGNORECASE):
+        return True
+    narrow_edge = (block.bbox.x1 - block.bbox.x0) <= 70 and (
+        block.bbox.x0 <= config.detection.crop_left_margin or block.bbox.x1 >= layout.width - config.detection.crop_right_margin
+    )
+    tall = (block.bbox.y1 - block.bbox.y0) >= 80
+    return narrow_edge and tall
+
+
+def _is_control_artifact_text(text: str) -> bool:
+    if not text:
+        return False
+    control_count = sum(1 for char in text if ord(char) < 32 and char not in "\n\t\r")
+    return control_count >= 2 or (control_count >= 1 and len(text.strip()) <= 6)
 
 
 def _is_answer_space_text(text: str) -> bool:
@@ -630,6 +718,7 @@ def _crop_diagnostics(
         "regions": [
             {
                 "page_number": region.page_number,
+                "original_crop_bbox": _box_payload(region.original_bbox or region.bbox),
                 "final_crop_bbox": {
                     "x0": round(region.bbox.x0, 2),
                     "y0": round(region.bbox.y0, 2),
@@ -639,9 +728,23 @@ def _crop_diagnostics(
                 "merged_blocks": len(region.text_blocks),
                 "graphics_count": len(region.graphics),
                 "duplicate_visual_blocks_removed": region.duplicate_graphics_removed,
+                "excluded_regions": region.excluded_regions,
             }
             for region in regions
         ],
+    }
+
+
+def _excluded_region(label: str, box: BoundingBox) -> dict[str, object]:
+    return {"label": label, "bbox": _box_payload(box)}
+
+
+def _box_payload(box: BoundingBox) -> dict[str, float]:
+    return {
+        "x0": round(box.x0, 2),
+        "y0": round(box.y0, 2),
+        "x1": round(box.x1, 2),
+        "y1": round(box.y1, 2),
     }
 
 
