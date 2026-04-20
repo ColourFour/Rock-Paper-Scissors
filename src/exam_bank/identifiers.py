@@ -4,7 +4,7 @@ import re
 
 
 _QUESTION_ID_RE = re.compile(
-    r"(?:question\s*)?(?P<number>\d{1,2})\s*(?:\(?\s*(?P<alpha>[a-h])\s*\)?)?\s*(?:\(?\s*(?P<roman>i{1,3}|iv|v|vi{0,3}|ix|x)\s*\)?)?",
+    r"(?:question\s*)?(?P<number>\d{1,2})\s*(?:\(?\s*(?P<alpha>[a-h])\s*\)?)?\s*(?:\(?\s*(?P<roman>viii|vii|vi|iv|ix|iii|ii|i|v|x)\s*\)?)?",
     re.IGNORECASE,
 )
 

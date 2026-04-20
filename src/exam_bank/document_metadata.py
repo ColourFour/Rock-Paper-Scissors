@@ -75,16 +75,18 @@ class DocumentMetadata:
     @property
     def canonical_key(self) -> str:
         session = self.normalized_session_key or self.session
-        if not (self.syllabus and self.year and session and self.component):
+        if not (self.year and session and self.component):
             return ""
-        return f"{self.syllabus}_{self.year}_{session}_{self.component}"
+        syllabus = self.syllabus or "unknown"
+        return f"{syllabus}_{self.year}_{session}_{self.component}"
 
     @property
     def session_key(self) -> str:
         session = self.normalized_session_key or self.session
-        if not (self.syllabus and self.year and session):
+        if not (self.year and session):
             return ""
-        return f"{self.syllabus}_{self.year}_{session}"
+        syllabus = self.syllabus or "unknown"
+        return f"{syllabus}_{self.year}_{session}"
 
     @property
     def compact_document_type(self) -> str:
@@ -123,6 +125,8 @@ def parse_filename_metadata(path: str | Path) -> DocumentMetadata:
             year = _normalize_year(year_match.group(1))
     if not session:
         session = _session_from_text(stem)
+    if syllabus and syllabus == year:
+        syllabus = ""
 
     return DocumentMetadata(
         syllabus=syllabus,
@@ -267,6 +271,7 @@ def _document_type_from_tokens(tokens: list[str]) -> str:
     joined = "_".join(tokens)
     phrase_checks = [
         ("question_paper", "question_paper"),
+        ("exam_paper", "question_paper"),
         ("mark_scheme", "mark_scheme"),
         ("examiner_report", "examiner_report"),
     ]
@@ -274,7 +279,7 @@ def _document_type_from_tokens(tokens: list[str]) -> str:
         if phrase in joined:
             return value
     for key, value in DOCUMENT_TYPE_ALIASES.items():
-        if key in tokens or key in joined:
+        if key in tokens or (len(key) > 2 and key in joined):
             return value
     return ""
 
@@ -287,6 +292,9 @@ def _component_from_tokens(tokens: list[str], document_type: str) -> str:
     for token in reversed(tokens):
         if re.fullmatch(r"[1-6][0-9]", token):
             return token
+        paper_family = re.fullmatch(r"p([1-6])", token)
+        if paper_family:
+            return paper_family.group(1)
     return ""
 
 

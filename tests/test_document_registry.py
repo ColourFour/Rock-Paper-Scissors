@@ -43,6 +43,22 @@ def test_filename_metadata_normalizes_compact_and_phrase_sessions() -> None:
     assert phrase.canonical_key == "9709_2025_OctNov_12"
 
 
+def test_filename_metadata_handles_loose_exam_paper_p_family_names() -> None:
+    question = parse_filename_metadata("March 2019 Exam Paper P1 (2).pdf")
+    mark_scheme = parse_filename_metadata("March 2019 Mark Scheme P1 (2).pdf")
+
+    assert question.syllabus == ""
+    assert question.year == "2019"
+    assert question.session == "March"
+    assert question.document_type == "question_paper"
+    assert question.component == "1"
+    assert question.paper_family == "P1"
+    assert question.canonical_key == "unknown_2019_March_1"
+    assert mark_scheme.document_type == "mark_scheme"
+    assert mark_scheme.component == "1"
+    assert mark_scheme.canonical_key == question.canonical_key
+
+
 def test_reconcile_metadata_treats_november_and_octnov_as_compatible() -> None:
     filename = DocumentMetadata(
         syllabus="9709",

@@ -8,15 +8,20 @@ from exam_bank.mark_schemes import (
     MarkSchemeAnchor,
     MarkSchemeTable,
     MarkSchemeWord,
+    _blocks_for_table_anchor_bounds,
     _detect_mark_scheme_tables,
     _detect_table_question_anchors,
+    _detected_subparts_for_question,
     _mark_total_for_question_block,
+    _marks_from_marks_cell,
+    _next_boundary_anchor,
     _parse_mark_scheme_question_cell,
     _table_regions_for_anchor,
     _validate_mark_scheme_mapping,
     find_mark_scheme,
 )
 from exam_bank.models import BoundingBox, PageLayout, QuestionRecord, TextBlock
+from exam_bank.pipeline import _question_subparts_from_text
 from exam_bank.question_detection import detect_question_spans, extract_marks_from_text, parse_question_start
 
 
@@ -119,7 +124,7 @@ def test_mark_scheme_table_mapping_merges_blank_question_number_continuation_row
     assert [anchor.question_number for anchor in anchors] == ["1", "2"]
     assert not flags
     assert len(regions) == 1
-    assert regions[0].bbox.y0 < 105
+    assert anchors[0].y0 - config.detection.crop_padding <= regions[0].bbox.y0 <= anchors[0].y0
     assert regions[0].bbox.y1 > 195
     assert regions[0].bbox.y1 < 220
     assert regions[0].bbox.x0 <= tables[6].bbox.x0
@@ -151,6 +156,7 @@ def test_question_id_normalization_preserves_subparts() -> None:
     assert normalize_question_id("3(a)") == "3(a)"
     assert normalize_question_id("3a") == "3(a)"
     assert normalize_question_id("Question 3(a)") == "3(a)"
+    assert normalize_question_id("8(iv)") == "8(iv)"
     assert _parse_mark_scheme_question_cell("3(b)", {"3(b)"}) == "3(b)"
     assert _parse_mark_scheme_question_cell("8x4", {"8"}) is None
     assert _parse_mark_scheme_question_cell("2(x2", {"2"}) is None
@@ -277,6 +283,81 @@ def test_mark_scheme_full_parent_block_includes_all_subparts_and_marks() -> None
     assert regions[0].bbox.y1 <= anchors[-1].y0
 
 
+def test_mark_scheme_whole_question_group_includes_roman_subparts_and_excludes_next_parent() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=6,
+        width=595,
+        height=842,
+        blocks=[
+            cell(6, "Question", 100, x=45, width=55),
+            cell(6, "Answer", 100, x=130, width=50),
+            cell(6, "Marks", 100, x=390, width=45),
+            cell(6, "Guidance", 100, x=455, width=65),
+            cell(6, "8(i)", 135, x=50, width=35),
+            cell(6, "Part i answer", 135, x=130, width=100),
+            cell(6, "B2", 135, x=390, width=25),
+            cell(6, "8(ii)", 170, x=50, width=35),
+            cell(6, "Part ii answer", 170, x=130, width=100),
+            cell(6, "B1", 170, x=390, width=25),
+            cell(6, "8(iii)", 205, x=50, width=42),
+            cell(6, "Part iii answer", 205, x=130, width=100),
+            cell(6, "M1 A1 A1", 205, x=390, width=55),
+            cell(6, "8(iv)", 240, x=50, width=42),
+            cell(6, "Part iv answer", 240, x=130, width=100),
+            cell(6, "M1 A1 M1 A1", 240, x=390, width=75),
+            cell(6, "9(i)", 295, x=50, width=35),
+            cell(6, "Next question", 295, x=130, width=100),
+        ],
+    )
+
+    tables = _detect_mark_scheme_tables([layout], config)
+    anchors = _detect_table_question_anchors([layout], tables, config, ["8", "9"])
+    regions, flags = _table_regions_for_anchor([layout], tables, anchors[0], anchors[-1], config)
+    mark_total = _mark_total_for_question_block([layout], anchors[0], anchors[-1], tables)
+    detected_subparts = _detected_subparts_for_question(anchors, 0, "8")
+    validation_flags, reason = _validate_mark_scheme_mapping(
+        "8",
+        ["i", "ii", "iii", "iv"],
+        detected_subparts,
+        10,
+        mark_total,
+        anchors[0],
+        anchors[-1],
+        regions,
+        flags,
+    )
+
+    assert [anchor.question_number for anchor in anchors] == ["8(i)", "8(ii)", "8(iii)", "8(iv)", "9(i)"]
+    assert detected_subparts == ["i", "ii", "iii", "iv"]
+    assert mark_total == 10
+    assert not validation_flags
+    assert reason == ""
+    assert regions[0].bbox.y1 <= anchors[-1].y0
+
+
+def test_mark_scheme_parent_boundary_prefers_first_child_anchor_over_stray_parent_number() -> None:
+    table = MarkSchemeTable(
+        page_number=1,
+        bbox=BoundingBox(40, 50, 540, 430),
+        question_col_right=120,
+        marks_col_left=350,
+        marks_col_right=420,
+        header_bottom=70,
+        confidence="high",
+        header_detected=["Question", "Answer", "Marks", "Guidance"],
+    )
+    anchors = [
+        MarkSchemeAnchor("9(a)", 1, 90, 102, 60, "9(a)", table),
+        MarkSchemeAnchor("10", 1, 220, 232, 60, "10", table),
+        MarkSchemeAnchor("10(a)", 2, 90, 102, 60, "10(a)", table),
+        MarkSchemeAnchor("10(b)", 3, 90, 102, 60, "10(b)", table),
+        MarkSchemeAnchor("11", 4, 90, 102, 60, "11", table),
+    ]
+
+    assert _next_boundary_anchor(anchors, 0, "9") == anchors[2]
+
+
 def test_mark_scheme_mapping_rejects_missing_subpart_and_marks_mismatch() -> None:
     config = AppConfig()
     layout = PageLayout(
@@ -380,6 +461,11 @@ def test_mark_scheme_mark_total_sums_standalone_subpart_totals_after_alternative
     assert mark_total == 9
 
 
+def test_mark_scheme_marks_cell_prefers_mark_codes_over_answer_digits() -> None:
+    assert _marks_from_marks_cell("8x2 ± 2x M1") == [1]
+    assert _marks_from_marks_cell("Page 10 of 21") == []
+
+
 def test_mark_scheme_table_detection_ignores_earlier_non_answer_table() -> None:
     config = AppConfig()
     layout = PageLayout(
@@ -412,7 +498,7 @@ def test_mark_scheme_table_detection_ignores_earlier_non_answer_table() -> None:
     assert anchors[0].y0 == 245
 
 
-def test_mark_scheme_table_crop_includes_header_row_and_full_width() -> None:
+def test_mark_scheme_table_crop_starts_at_target_row_and_keeps_full_width() -> None:
     config = AppConfig()
     layout = PageLayout(
         page_number=6,
@@ -441,8 +527,7 @@ def test_mark_scheme_table_crop_includes_header_row_and_full_width() -> None:
     assert len(regions) == 1
     assert regions[0].bbox.x0 == tables[6].bbox.x0
     assert regions[0].bbox.x1 == tables[6].bbox.x1
-    assert regions[0].bbox.y0 <= tables[6].bbox.y0
-    assert regions[0].bbox.y0 < anchors[0].y0
+    assert anchors[0].y0 - config.detection.crop_padding <= regions[0].bbox.y0 <= anchors[0].y0
     assert regions[0].bbox.y1 > 172
     assert regions[0].bbox.y1 < anchors[1].y0
 
@@ -489,6 +574,77 @@ def test_mark_scheme_table_crop_prefers_visible_ruling_lines() -> None:
     assert regions[0].bbox.x1 == 560
     assert regions[0].bbox.y0 == 95
     assert regions[0].bbox.y1 == 202
+
+
+def test_mark_scheme_crop_hard_stops_before_next_question_anchor() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=6,
+        width=595,
+        height=842,
+        blocks=[
+            cell(6, "Question", 100, x=45, width=55),
+            cell(6, "Answer", 100, x=130, width=50),
+            cell(6, "Marks", 100, x=390, width=45),
+            cell(6, "Guidance", 100, x=455, width=65),
+            cell(6, "1", 140, x=50, width=10),
+            cell(6, "Solution line", 140, x=130, width=120),
+            cell(6, "M1", 140, x=390, width=25),
+            cell(6, "2", 210, x=50, width=10),
+            cell(6, "Next question", 210, x=130, width=100),
+        ],
+    )
+
+    tables = _detect_mark_scheme_tables([layout], config)
+    anchors = _detect_table_question_anchors([layout], tables, config, ["1", "2"])
+    regions, flags = _table_regions_for_anchor([layout], tables, anchors[0], anchors[1], config)
+
+    assert not flags
+    assert len(regions) == 1
+    assert regions[0].bbox.y1 <= anchors[1].y0
+
+
+def test_mark_scheme_text_uses_same_anchor_bounds_as_image_crop() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=6,
+        width=595,
+        height=842,
+        blocks=[
+            cell(6, "Question", 100, x=45, width=55),
+            cell(6, "Answer", 100, x=130, width=50),
+            cell(6, "Marks", 100, x=390, width=45),
+            cell(6, "Guidance", 100, x=455, width=65),
+            cell(6, "1", 135, x=50, width=10),
+            cell(6, "Previous answer tail", 135, x=130, width=120),
+            cell(6, "2", 210, x=50, width=10),
+            cell(6, "Target first row", 210, x=130, width=120),
+            cell(6, "Target continuation", 240, x=130, width=120),
+            cell(6, "3", 300, x=50, width=10),
+            cell(6, "Next answer row", 300, x=130, width=120),
+        ],
+    )
+
+    tables = _detect_mark_scheme_tables([layout], config)
+    anchors = _detect_table_question_anchors([layout], tables, config, ["1", "2", "3"])
+    regions, flags = _table_regions_for_anchor([layout], tables, anchors[1], anchors[2], config)
+    text_blocks = _blocks_for_table_anchor_bounds([layout], tables, anchors[1], anchors[2], config)
+    text = "\n".join(block.text for block in text_blocks)
+
+    assert not flags
+    assert regions[0].bbox.y0 <= anchors[1].y0
+    assert regions[0].bbox.y1 <= anchors[2].y0
+    assert "Target first row" in text
+    assert "Target continuation" in text
+    assert "Previous answer tail" not in text
+    assert "Next answer row" not in text
+
+
+def test_question_subparts_preserve_roman_and_alpha_labels() -> None:
+    text = "8 (i) First. [2]\n(ii) Second. [1]\n(iii) Third. [3]\n(iv) Fourth. [4]"
+
+    assert _question_subparts_from_text(text) == ["i", "ii", "iii", "iv"]
+    assert _question_subparts_from_text("7 (a) First. [5]\n(b) Second. [3]") == ["a", "b"]
 
 
 def test_record_json_schema_contains_required_fields(tmp_path: Path) -> None:

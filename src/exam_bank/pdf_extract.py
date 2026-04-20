@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from statistics import median
 from pathlib import Path
 from typing import Any
 
@@ -44,9 +45,13 @@ def extract_pdf_layout(pdf_path: str | Path, config: AppConfig, use_ocr: bool | 
                         ocr_blocks = []
                         warning = f"ocr_failed:{exc.__class__.__name__}"
                     if ocr_blocks:
-                        blocks = ocr_blocks
-                        source = "ocr"
-                        warning = "ocr_used_low_pdf_text"
+                        merged_blocks = _merge_pdf_and_ocr_blocks(blocks, ocr_blocks)
+                        if merged_blocks:
+                            blocks = merged_blocks
+                            source = "pdf+ocr" if any(block.source == "ocr" for block in merged_blocks) else "pdf"
+                            warning = "ocr_merged_low_pdf_text"
+                        elif warning is None:
+                            warning = "weak_text_no_ocr_words"
                     elif warning is None:
                         warning = "weak_text_no_ocr_words"
                 else:
@@ -127,32 +132,56 @@ def _group_spans_into_visual_lines(spans: list[dict[str, Any]], y_tolerance: flo
         else:
             lines[target_index].append(span)
 
-    return sorted(lines, key=lambda line: (_line_center_y(line), min(_span_x0(span) for span in line)))
+    normalized_lines: list[list[dict[str, Any]]] = []
+    for line in lines:
+        normalized_lines.append(sorted(line, key=lambda span: (_span_x0(span), _span_center_y(span))))
+
+    return sorted(normalized_lines, key=lambda line: (_line_center_y(line), min(_span_x0(span) for span in line)))
 
 
 def _matching_line_index(span: dict[str, Any], lines: list[list[dict[str, Any]]], y_tolerance: float) -> int | None:
     best_index: int | None = None
-    best_distance: float | None = None
+    best_score: float | None = None
+    span_size = max(1.0, float(span.get("size", 0)))
+    span_center = _span_center_y(span)
+
     for index, line in enumerate(lines):
         line_center = _line_center_y(line)
-        distance = abs(_span_center_y(span) - line_center)
-        tolerance = max(y_tolerance, _line_median_font_size(line) * 0.65, float(span.get("size", 0)) * 0.65)
-        if distance <= tolerance or _vertical_overlap_ratio(span, line) >= 0.28:
-            if best_distance is None or distance < best_distance:
-                best_index = index
-                best_distance = distance
+        line_size = max(1.0, _line_median_font_size(line))
+        distance = abs(span_center - line_center)
+        overlap_ratio = _vertical_overlap_ratio(span, line)
+        tolerance = max(y_tolerance, line_size * 0.8, span_size * 0.8)
+
+        if distance > tolerance and overlap_ratio < 0.35:
+            continue
+
+        score = distance - overlap_ratio * line_size
+        if best_score is None or score < best_score:
+            best_index = index
+            best_score = score
     return best_index
+
+
+def _is_mark_token(text: str) -> bool:
+    text = text.strip()
+    return len(text) >= 3 and text[0] == "[" and text[-1] == "]" and text[1:-1].isdigit()
+
+
+def _is_question_number_token(text: str) -> bool:
+    return text.strip().isdigit()
 
 
 def _line_text_from_spans(spans: list[dict[str, Any]]) -> str:
     if not spans:
         return ""
-    spans = sorted(spans, key=lambda span: (float(span.get("bbox", [0, 0, 0, 0])[0]), float(span.get("bbox", [0, 0, 0, 0])[1])))
+    spans = sorted(spans, key=lambda span: (_span_x0(span), _span_center_y(span)))
     font_sizes = [float(span.get("size", 0)) for span in spans if span.get("text", "").strip()]
     max_size = max(font_sizes) if font_sizes else 0
+    median_size = median(font_sizes) if font_sizes else 0
     line_bbox = _line_bbox_from_spans(spans)
     line_mid = (line_bbox[1] + line_bbox[3]) / 2
     pieces: list[str] = []
+    previous_span: dict[str, Any] | None = None
     previous_x1: float | None = None
     previous_text = ""
 
@@ -161,23 +190,60 @@ def _line_text_from_spans(spans: list[dict[str, Any]]) -> str:
         if not text:
             continue
         x0, y0, x1, y1 = [float(value) for value in span.get("bbox", [0, 0, 0, 0])]
-        gap = x0 - previous_x1 if previous_x1 is not None else 0
+        gap = x0 - previous_x1 if previous_x1 is not None else 0.0
         operator_gap = _needs_operator_spacing(previous_text, text) and gap > 0.5
-        if previous_x1 is not None and (operator_gap or gap > max(2.0, float(span.get("size", max_size)) * 0.35)):
+        threshold = max(2.0, float(span.get("size", max_size or 1)) * 0.35)
+        if previous_x1 is not None and (operator_gap or gap > threshold):
             pieces.append(" ")
+
+        normalized = text.strip()
+        size = float(span.get("size", max_size or 0))
+        span_mid = (y0 + y1) / 2
+        vertical_shift = abs(span_mid - line_mid)
+        previous_bbox = previous_span.get("bbox", [0, 0, 0, 0]) if previous_span is not None else None
+        previous_gap = x0 - float(previous_bbox[2]) if previous_bbox is not None else float("inf")
+        previous_mid = (
+            (float(previous_bbox[1]) + float(previous_bbox[3])) / 2 if previous_bbox is not None else line_mid
+        )
+        baseline_shift_from_previous = abs(span_mid - previous_mid)
+        small_math_token = 0 < len(normalized) <= 2 and normalized not in {",", ".", ":", ";"}
+        attached_to_previous = previous_span is not None and previous_gap <= max(2.0, median_size * 0.35)
+        previous_text_normalized = str(previous_span.get("text", "")).strip() if previous_span is not None else ""
+        previous_supports_script = any(ch.isalnum() or ch in ")]" for ch in previous_text_normalized)
+        is_script_candidate = (
+            bool(normalized)
+            and not _is_mark_token(normalized)
+            and not (_is_question_number_token(normalized) and not attached_to_previous)
+            and bool(max_size)
+            and bool(median_size)
+            and small_math_token
+            and size <= max_size * 0.82
+            and attached_to_previous
+            and previous_supports_script
+            and (
+                vertical_shift >= max(1.0, median_size * 0.08)
+                or baseline_shift_from_previous >= max(1.0, median_size * 0.15)
+            )
+        )
+        if is_script_candidate:
+            script_threshold = max(0.6, median_size * 0.04)
+            if span_mid < previous_mid - script_threshold:
+                pieces.append(f"^{{{text}}}")
+                previous_span = span
+                previous_x1 = x1
+                previous_text = text
+                continue
+            if span_mid > previous_mid + script_threshold:
+                pieces.append(f"_{{{text}}}")
+                previous_span = span
+                previous_x1 = x1
+                previous_text = text
+                continue
+
+        pieces.append(text)
+        previous_span = span
         previous_x1 = x1
         previous_text = text
-
-        size = float(span.get("size", max_size))
-        span_mid = (y0 + y1) / 2
-        if max_size and size <= max_size * 0.82 and text.strip():
-            if span_mid < line_mid - 1:
-                pieces.append(f"^{{{text}}}")
-                continue
-            if span_mid > line_mid + 1:
-                pieces.append(f"_{{{text}}}")
-                continue
-        pieces.append(text)
 
     return "".join(pieces)
 
@@ -237,10 +303,15 @@ def _vertical_overlap_ratio(span: dict[str, Any], line: list[dict[str, Any]]) ->
 
 def _extract_graphics(page: Any) -> list[BoundingBox]:
     boxes: list[BoundingBox] = []
+    page_width = float(page.rect.width)
+    page_height = float(page.rect.height)
+
     for drawing in page.get_drawings():
         rect = drawing.get("rect")
         if rect and rect.is_valid and not rect.is_empty:
-            boxes.append(_visual_box_from_rect(page, rect))
+            box = _visual_box_from_rect(page, rect)
+            if _is_meaningful_graphic_box(box, page_width, page_height):
+                boxes.append(box)
 
     try:
         image_infos = page.get_image_info(xrefs=True)
@@ -249,8 +320,53 @@ def _extract_graphics(page: Any) -> list[BoundingBox]:
     for image_info in image_infos:
         bbox = image_info.get("bbox")
         if bbox:
-            boxes.append(_visual_box_from_rect(page, bbox))
+            box = _visual_box_from_rect(page, bbox)
+            if _is_meaningful_graphic_box(box, page_width, page_height):
+                boxes.append(box)
     return boxes
+
+
+def _is_meaningful_graphic_box(box: BoundingBox, page_width: float, page_height: float) -> bool:
+    width = max(0.0, box.x1 - box.x0)
+    height = max(0.0, box.y1 - box.y0)
+    area = width * height
+    if area < 36:
+        return False
+
+    page_area = max(1.0, page_width * page_height)
+    if area >= page_area * 0.9:
+        return False
+
+    very_thin_horizontal = width >= page_width * 0.25 and height <= 2.5
+    very_thin_vertical = height >= page_height * 0.25 and width <= 2.5
+    if very_thin_horizontal or very_thin_vertical:
+        return False
+
+    near_page_edge = box.y0 <= 8 or box.y1 >= page_height - 8 or box.x0 <= 8 or box.x1 >= page_width - 8
+    edge_artifact = near_page_edge and area < page_area * 0.01
+    if edge_artifact:
+        return False
+
+    return True
+
+
+def _merge_pdf_and_ocr_blocks(pdf_blocks: list[TextBlock], ocr_blocks: list[TextBlock]) -> list[TextBlock]:
+    merged = list(pdf_blocks)
+    for ocr_block in ocr_blocks:
+        if any(_boxes_overlap_ratio(existing.bbox, ocr_block.bbox) >= 0.55 for existing in pdf_blocks):
+            continue
+        merged.append(ocr_block)
+    return sorted(merged, key=lambda block: (block.bbox.y0, block.bbox.x0))
+
+
+def _boxes_overlap_ratio(a: BoundingBox, b: BoundingBox) -> float:
+    overlap_w = max(0.0, min(a.x1, b.x1) - max(a.x0, b.x0))
+    overlap_h = max(0.0, min(a.y1, b.y1) - max(a.y0, b.y0))
+    overlap_area = overlap_w * overlap_h
+    if overlap_area <= 0:
+        return 0.0
+    min_area = max(1.0, min((a.x1 - a.x0) * (a.y1 - a.y0), (b.x1 - b.x0) * (b.y1 - b.y0)))
+    return overlap_area / min_area
 
 
 def _visual_bbox(page: Any, bbox: Any) -> list[float]:

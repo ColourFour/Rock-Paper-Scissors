@@ -124,29 +124,11 @@ def build_records_for_pdf(
     source_paper_code, _source_paper_code_confidence = infer_source_paper_code(question_pdf.name)
     source_paper_code = document_metadata.component or source_paper_code
     for span in spans:
-        answer_text = answers.get(span.question_number, "")
-        flags = list(span.review_flags)
-        flags.extend(mark_scheme_flags)
-        flags.extend(document_metadata.warnings)
-        flags.extend(registry_warnings or [])
-        if matched_mark_scheme and matched_mark_scheme.exists() and not answer_text:
-            flags.append("unmatched_answer")
-        mark_scheme_image = mark_scheme_images.get(span.question_number)
-        if matched_mark_scheme and matched_mark_scheme.exists():
-            if mark_scheme_image is None or not mark_scheme_image.image_path:
-                flags.append("markscheme_image_missing")
-            elif mark_scheme_image.crop_confidence != "high":
-                flags.append("markscheme_image_uncertain")
-        if mark_scheme_image:
-            flags.extend(mark_scheme_image.review_flags)
-
         render_result = render_question_image(question_pdf, span, layouts, config)
-        if not render_result.screenshot_path:
-            flags.append("missing_question_image")
-        if render_result.crop_uncertain:
-            flags.append("low_confidence_question_crop")
         question_text = render_result.extracted_text or span.combined_text
         marks = extract_marks_from_text(question_text)
+        answer_text = answers.get(span.question_number, "")
+        mark_scheme_image = mark_scheme_images.get(span.question_number)
         examiner_evidence = examiner_report_topic_evidence(
             question_pdf,
             config.input.examiner_reports_dir,
@@ -155,6 +137,66 @@ def build_records_for_pdf(
             report_paths=examiner_report_paths,
         )
         examiner_text = examiner_evidence.classification_text if examiner_evidence else ""
+        records.append(
+            _build_question_record(
+                question_pdf=question_pdf,
+                span=span,
+                question_text=question_text,
+                marks=marks,
+                answer_text=answer_text,
+                render_result=render_result,
+                mark_scheme_image=mark_scheme_image,
+                mark_scheme_flags=mark_scheme_flags,
+                matched_mark_scheme=matched_mark_scheme,
+                document_metadata=document_metadata,
+                registry_warnings=registry_warnings or [],
+                config=config,
+                source_paper_code=source_paper_code,
+                examiner_evidence=examiner_evidence,
+                examiner_text=examiner_text,
+            )
+        )
+    _write_pdf_diagnostic(question_pdf, layouts, spans, records, config)
+    _write_topic_debug_report(question_pdf, records, config)
+    return records
+
+
+def _build_question_record(
+    *,
+    question_pdf: Path,
+    span: QuestionSpan,
+    question_text: str,
+    marks: int | None,
+    answer_text: str,
+    render_result,
+    mark_scheme_image: MarkSchemeImageResult | None,
+    mark_scheme_flags: list[str],
+    matched_mark_scheme: Path | None,
+    document_metadata: DocumentMetadata,
+    registry_warnings: list[str],
+    config: AppConfig,
+    source_paper_code: str,
+    examiner_evidence,
+    examiner_text: str,
+) -> QuestionRecord:
+        flags = list(span.review_flags)
+        flags.extend(mark_scheme_flags)
+        flags.extend(document_metadata.warnings)
+        flags.extend(registry_warnings)
+        if matched_mark_scheme and matched_mark_scheme.exists() and not answer_text:
+            flags.append("unmatched_answer")
+        if matched_mark_scheme and matched_mark_scheme.exists():
+            if mark_scheme_image is None or not mark_scheme_image.image_path:
+                flags.append("markscheme_image_missing")
+            elif mark_scheme_image.crop_confidence != "high":
+                flags.append("markscheme_image_uncertain")
+        if mark_scheme_image:
+            flags.extend(mark_scheme_image.review_flags)
+
+        if not render_result.screenshot_path:
+            flags.append("missing_question_image")
+        if render_result.crop_uncertain:
+            flags.append("low_confidence_question_crop")
         classification = classify_question(
             question_text,
             marks,
@@ -182,8 +224,7 @@ def build_records_for_pdf(
         flags.extend(render_result.review_flags)
         confidence = _record_confidence(float(question_topic["confidence"]), flags)
 
-        records.append(
-            QuestionRecord(
+        return QuestionRecord(
                 source_pdf=_display_path(question_pdf),
                 paper_name=span.paper_name,
                 question_number=span.question_number,
@@ -243,19 +284,15 @@ def build_records_for_pdf(
                 markscheme_debug_paths=mark_scheme_image.debug_paths if mark_scheme_image else [],
                 markscheme_table_header_ok=mark_scheme_image.table_header_ok if mark_scheme_image else False,
                 markscheme_continuation_rows_included=mark_scheme_image.continuation_rows_included if mark_scheme_image else False,
-                question_subparts=mark_scheme_image.question_subparts if mark_scheme_image else expected_subparts.get(span.question_number, []),
+                question_subparts=mark_scheme_image.question_subparts if mark_scheme_image else [],
                 markscheme_subparts=mark_scheme_image.markscheme_subparts if mark_scheme_image else [],
-                question_marks_total=mark_scheme_image.question_marks_total if mark_scheme_image else expected_marks.get(span.question_number),
+                question_marks_total=mark_scheme_image.question_marks_total if mark_scheme_image else marks,
                 markscheme_marks_total=mark_scheme_image.markscheme_marks_total if mark_scheme_image else None,
                 markscheme_mapping_status=mark_scheme_image.mapping_status if mark_scheme_image else "fail",
                 markscheme_failure_reason=mark_scheme_image.failure_reason if mark_scheme_image else "partial_question_block",
                 qa_status="fail" if any(flag.startswith("qa_fail_") for flag in qa_flags) else ("warning" if qa_flags else "pass"),
                 qa_flags=qa_flags,
             )
-        )
-    _write_pdf_diagnostic(question_pdf, layouts, spans, records, config)
-    _write_topic_debug_report(question_pdf, records, config)
-    return records
 
 
 def _record_qa_flags(
@@ -284,10 +321,16 @@ def _record_qa_flags(
     return sorted(set(flags))
 
 
+_QUESTION_SUBPART_LABEL_RE = re.compile(
+    r"(?<![A-Za-z0-9])\((?P<label>a|b|c|d|e|f|g|h|viii|vii|vi|iv|ix|iii|ii|i|v|x)\)",
+    re.IGNORECASE,
+)
+
+
 def _question_subparts_from_text(text: str) -> list[str]:
     subparts: list[str] = []
-    for match in re.finditer(r"(?<![A-Za-z])\(([a-h])\)", text, re.IGNORECASE):
-        label = match.group(1).lower()
+    for match in _QUESTION_SUBPART_LABEL_RE.finditer(text):
+        label = match.group("label").lower()
         if label not in subparts:
             subparts.append(label)
     return subparts
