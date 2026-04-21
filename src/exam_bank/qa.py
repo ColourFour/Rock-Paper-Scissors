@@ -391,9 +391,6 @@ def _check_mapping_consistency(record: dict[str, Any], flags: list[str], notes: 
     if markscheme_question_number and question_number and _normalize_question_number(markscheme_question_number) != _normalize_question_number(question_number):
         _add(flags, "markscheme_question_number_mismatch")
         notes.append(f"mark scheme question number is {markscheme_question_number}, expected {question_number}")
-    if any(int(page) < 6 for page in _list_int(record.get("markscheme_pages"))):
-        _add(flags, "markscheme_page_before_6")
-        notes.append("mark scheme crop came from a page before page 6")
     if record.get("markscheme_image") and record.get("markscheme_table_header_ok") is False and not bool(record.get("markscheme_table_detected")):
         _add(flags, "markscheme_header_not_ok")
         notes.append("mark scheme crop is not linked to the expected answer-table header")

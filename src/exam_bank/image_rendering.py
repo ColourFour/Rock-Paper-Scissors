@@ -217,7 +217,9 @@ def _detect_prompt_regions(
             )
 
     regions, overlap_flags = _remove_meaningful_region_overlaps(regions, config)
+    regions, dedupe_flags = _dedupe_crop_regions(regions)
     flags.extend(overlap_flags)
+    flags.extend(dedupe_flags)
     return regions, sorted(set(flags))
 
 
@@ -234,6 +236,9 @@ def _single_page_union_regions(
         return None, ["single_page_union_skipped_multi_page"]
     if not any(region.graphics for region in regions):
         return None, ["single_page_union_skipped_no_graphics"]
+    grouped_regions = _nearby_region_groups(regions, config)
+    if len(grouped_regions) > 1 and _has_disjoint_text_only_tail(grouped_regions):
+        return None, ["single_page_union_skipped_disjoint_tail"]
 
     page_number = next(iter(page_numbers))
     layout = _layout_by_number(layouts, page_number)
@@ -272,7 +277,9 @@ def _single_page_union_regions(
             graphics=graphics,
             duplicate_graphics_removed=sum(region.duplicate_graphics_removed for region in regions),
             original_bbox=union_box,
-            excluded_regions=[excluded for region in regions for excluded in region.excluded_regions],
+            excluded_regions=_dedupe_excluded_regions(
+                [excluded for region in regions for excluded in region.excluded_regions]
+            ),
             region_kind="single_page_union",
             text_bbox=_union_boxes([block.bbox for block in text_blocks]) if text_blocks else None,
             figure_bbox=_union_boxes(graphics) if graphics else None,
@@ -307,7 +314,9 @@ def _same_page_diagram_union_regions(
             output.append(union_region)
             flags.extend([reason, f"page_diagram_union_fragments:{len(group)}"])
 
-    return sorted(output, key=lambda region: (region.page_number, region.bbox.y0, region.bbox.x0)), flags
+    deduped, dedupe_flags = _dedupe_crop_regions(output)
+    flags.extend(dedupe_flags)
+    return sorted(deduped, key=lambda region: (region.page_number, region.bbox.y0, region.bbox.x0)), flags
 
 
 def _nearby_region_groups(regions: list[CropRegion], config: AppConfig) -> list[list[CropRegion]]:
@@ -376,11 +385,18 @@ def _union_regions_for_page(
         graphics=graphics,
         duplicate_graphics_removed=sum(region.duplicate_graphics_removed for region in regions),
         original_bbox=union_box,
-        excluded_regions=[excluded for region in regions for excluded in region.excluded_regions],
+        excluded_regions=_dedupe_excluded_regions([excluded for region in regions for excluded in region.excluded_regions]),
         region_kind=kind,
         text_bbox=_union_boxes([block.bbox for block in text_blocks]) if text_blocks else None,
         figure_bbox=_union_boxes(graphics) if graphics else None,
     ), f"{kind}_used"
+
+
+def _has_disjoint_text_only_tail(groups: list[list[CropRegion]]) -> bool:
+    if len(groups) < 2:
+        return False
+    trailing_groups = groups[1:]
+    return any(not any(region.graphics for region in group) for group in trailing_groups)
 
 
 def _dominant_graphic_cluster(graphics: list[BoundingBox]) -> list[BoundingBox]:
@@ -730,6 +746,54 @@ def _remove_meaningful_region_overlaps(regions: list[CropRegion], config: AppCon
         if _box_width(current.bbox) >= 8 and _box_height(current.bbox) >= config.detection.min_crop_height * 0.5:
             cleaned.append(current)
     return cleaned, sorted(set(flags))
+
+
+def _dedupe_crop_regions(regions: list[CropRegion]) -> tuple[list[CropRegion], list[str]]:
+    kept: list[CropRegion] = []
+    flags: list[str] = []
+    for region in sorted(regions, key=lambda item: (item.page_number, _box_area(item.bbox), item.bbox.y0, item.bbox.x0), reverse=True):
+        if any(region.page_number == other.page_number and _region_is_stale_fragment(region, other) for other in kept):
+            flags.append("stale_crop_fragment_removed")
+            continue
+        if any(region.page_number == other.page_number and _boxes_duplicate(region.bbox, other.bbox) for other in kept):
+            flags.append("duplicate_crop_region_removed")
+            continue
+        kept.append(region)
+    return sorted(kept, key=lambda item: (item.page_number, item.bbox.y0, item.bbox.x0)), sorted(set(flags))
+
+
+def _dedupe_excluded_regions(excluded_regions: list[dict[str, object]]) -> list[dict[str, object]]:
+    seen: set[tuple[object, ...]] = set()
+    deduped: list[dict[str, object]] = []
+    for item in excluded_regions:
+        bbox = item.get("bbox") or {}
+        key = (
+            item.get("label"),
+            bbox.get("x0"),
+            bbox.get("y0"),
+            bbox.get("x1"),
+            bbox.get("y1"),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _region_is_stale_fragment(candidate: CropRegion, current: CropRegion) -> bool:
+    if _intersection_area(candidate.bbox, current.bbox) <= 1:
+        return False
+    if _box_area(candidate.bbox) >= _box_area(current.bbox):
+        return False
+    overlap_ratio = _intersection_area(candidate.bbox, current.bbox) / max(1.0, _box_area(candidate.bbox))
+    if overlap_ratio < 0.9:
+        return False
+    if candidate.region_kind == current.region_kind == "text":
+        candidate_text = {_clean_text_line(block.text) for block in candidate.text_blocks if _clean_text_line(block.text)}
+        current_text = {_clean_text_line(block.text) for block in current.text_blocks if _clean_text_line(block.text)}
+        return bool(candidate_text) and candidate_text <= current_text
+    return True
 
 
 def _is_prompt_text_block(block: TextBlock, span: QuestionSpan, layout: PageLayout, config: AppConfig) -> bool:

@@ -80,6 +80,17 @@ class MarkSchemeWord:
 
 
 @dataclass(frozen=True)
+class MarkSchemeRow:
+    page_number: int
+    y0: float
+    text: str
+    marks_cell: str
+    mark_values: tuple[int, ...]
+    standalone_total: int | None
+    question_label: str | None
+
+
+@dataclass(frozen=True)
 class HeaderGeometry:
     header_box: BoundingBox
     question_header: BoundingBox
@@ -241,7 +252,14 @@ def render_mark_scheme_images(
                 if anchor_index is not None
                 else []
             )
-            markscheme_marks_total = _mark_total_for_question_block(layouts, anchor, next_anchor, tables, words)
+            markscheme_marks_total = _mark_total_for_question_block(
+                layouts,
+                anchor,
+                next_anchor,
+                tables,
+                words,
+                question_marks_total,
+            )
             validation_flags, failure_reason = _validate_mark_scheme_mapping(
                 canonical_number,
                 question_subpart_values,
@@ -254,27 +272,6 @@ def render_mark_scheme_images(
                 flags,
             )
             flags.extend(validation_flags)
-            if failure_reason:
-                output[number] = MarkSchemeImageResult(
-                    question_number=number,
-                    markscheme_question_number=canonical_number if anchor else "",
-                    crop_confidence="low",
-                    mapping_method=mapping_method,
-                    table_detected=table_detected,
-                    table_header_detected=anchor.table.header_detected if anchor and anchor.table else [],
-                    nearby_anchors=nearby_anchors,
-                    review_flags=sorted(set(flags + ["markscheme_image_missing"])),
-                    table_header_ok=bool(anchor and anchor.table and _table_header_ok(anchor.table)),
-                    continuation_rows_included=any(region.continuation_rows_included for region in regions),
-                    question_subparts=question_subpart_values,
-                    markscheme_subparts=markscheme_subpart_values,
-                    question_marks_total=question_marks_total,
-                    markscheme_marks_total=markscheme_marks_total,
-                    mapping_status="fail",
-                    failure_reason=failure_reason,
-                )
-                continue
-
             if not regions:
                 output[number] = MarkSchemeImageResult(
                     question_number=number,
@@ -295,40 +292,20 @@ def render_mark_scheme_images(
                 )
                 continue
 
-            crops = []
-            debug_paths: list[str] = []
-            for region in regions:
-                page_number = region.page_number
-                box = region.bbox
-                page = doc[page_number - 1]
-                rect = fitz.Rect(box.x0, box.y0, box.x1, box.y1)
-                crop, used_zoom = render_pdf_area(
-                    page,
-                    fitz,
-                    dpi=config.detection.render_dpi,
-                    source_file=mark_scheme_pdf,
-                    page_number=page_number,
-                    context=f"markscheme_crop:{number}",
-                    clip=rect,
-                )
-                crops.append(crop)
-                if used_zoom * 72 < config.detection.render_dpi * 0.8:
-                    flags.append("markscheme_render_dpi_capped")
-
-                if config.debug.enabled and page_number not in rendered_pages:
-                    page_image, page_zoom = render_pdf_area(
-                        page,
-                        fitz,
-                        dpi=config.detection.render_dpi,
-                        source_file=mark_scheme_pdf,
-                        page_number=page_number,
-                        context=f"markscheme_debug_page:{number}",
-                    )
-                    rendered_pages[page_number] = (page_image, page_zoom)
-                    if config.debug.save_rendered_pages:
-                        debug_paths.append(_save_mark_scheme_debug_image(page_image, mark_scheme_pdf, number, page_number, "rendered", config))
-
-            if not crops:
+            output_path, debug_paths = _render_mark_scheme_crops(
+                doc,
+                fitz,
+                mark_scheme_pdf,
+                number,
+                regions,
+                flags,
+                rendered_pages,
+                layouts,
+                tables,
+                ordered_anchors,
+                config,
+            )
+            if output_path is None:
                 output[number] = MarkSchemeImageResult(
                     question_number=number,
                     markscheme_question_number=anchor.question_number if anchor else "",
@@ -348,19 +325,32 @@ def render_mark_scheme_images(
                 )
                 continue
 
-            if config.debug.enabled:
-                debug_paths.extend(_write_mark_scheme_debug_overlays(rendered_pages, mark_scheme_pdf, number, layouts, tables, ordered_anchors, regions, config))
-                debug_paths.append(_write_mark_scheme_debug_metadata(mark_scheme_pdf, number, tables, ordered_anchors, regions, config))
-
-            output_path = _mark_scheme_image_path(mark_scheme_pdf, number, config)
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            stitched = cap_image_pixels(
-                _stitch_images(crops, config.detection.stitch_gap_px),
-                source_file=mark_scheme_pdf,
-                context=f"markscheme_output:{number}",
-            )
-            stitched.save(output_path)
             confidence = _mark_scheme_crop_confidence(regions, layouts, flags)
+            if failure_reason:
+                output[number] = MarkSchemeImageResult(
+                    question_number=number,
+                    image_path=output_path,
+                    page_numbers=[region.page_number for region in regions],
+                    markscheme_question_number=canonical_number if anchor else "",
+                    crop_confidence=confidence,
+                    mapping_method=mapping_method,
+                    table_detected=table_detected,
+                    table_header_detected=anchor.table.header_detected if anchor and anchor.table else [],
+                    detected_anchor_pages=[anchor.page_number] if anchor else [],
+                    nearby_anchors=nearby_anchors,
+                    debug_paths=debug_paths,
+                    review_flags=sorted(set(flags)),
+                    table_header_ok=bool(anchor and anchor.table and _table_header_ok(anchor.table)),
+                    continuation_rows_included=any(region.continuation_rows_included for region in regions),
+                    question_subparts=question_subpart_values,
+                    markscheme_subparts=markscheme_subpart_values,
+                    question_marks_total=question_marks_total,
+                    markscheme_marks_total=markscheme_marks_total,
+                    mapping_status="fail",
+                    failure_reason=failure_reason,
+                )
+                continue
+
             output[number] = MarkSchemeImageResult(
                 question_number=number,
                 image_path=output_path,
@@ -398,6 +388,74 @@ def render_mark_scheme_images(
                 review_flags=["markscheme_image_missing"],
             )
     return output
+
+
+def _render_mark_scheme_crops(
+    doc,
+    fitz,
+    mark_scheme_pdf: Path,
+    question_number: str,
+    regions: list[MarkSchemeCropRegion],
+    flags: list[str],
+    rendered_pages: dict[int, tuple["Image.Image", float]],
+    layouts: list[PageLayout],
+    tables: dict[int, MarkSchemeTable],
+    ordered_anchors: list[MarkSchemeAnchor],
+    config: AppConfig,
+) -> tuple[Path | None, list[str]]:
+    crops = []
+    debug_paths: list[str] = []
+    for region in regions:
+        page_number = region.page_number
+        box = region.bbox
+        page = doc[page_number - 1]
+        rect = fitz.Rect(box.x0, box.y0, box.x1, box.y1)
+        crop, used_zoom = render_pdf_area(
+            page,
+            fitz,
+            dpi=config.detection.render_dpi,
+            source_file=mark_scheme_pdf,
+            page_number=page_number,
+            context=f"markscheme_crop:{question_number}",
+            clip=rect,
+        )
+        crops.append(crop)
+        if used_zoom * 72 < config.detection.render_dpi * 0.8:
+            flags.append("markscheme_render_dpi_capped")
+
+        if config.debug.enabled and page_number not in rendered_pages:
+            page_image, page_zoom = render_pdf_area(
+                page,
+                fitz,
+                dpi=config.detection.render_dpi,
+                source_file=mark_scheme_pdf,
+                page_number=page_number,
+                context=f"markscheme_debug_page:{question_number}",
+            )
+            rendered_pages[page_number] = (page_image, page_zoom)
+            if config.debug.save_rendered_pages:
+                debug_paths.append(
+                    _save_mark_scheme_debug_image(page_image, mark_scheme_pdf, question_number, page_number, "rendered", config)
+                )
+
+    if not crops:
+        return None, debug_paths
+
+    if config.debug.enabled:
+        debug_paths.extend(
+            _write_mark_scheme_debug_overlays(rendered_pages, mark_scheme_pdf, question_number, layouts, tables, ordered_anchors, regions, config)
+        )
+        debug_paths.append(_write_mark_scheme_debug_metadata(mark_scheme_pdf, question_number, tables, ordered_anchors, regions, config))
+
+    output_path = _mark_scheme_image_path(mark_scheme_pdf, question_number, config)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    stitched = cap_image_pixels(
+        _stitch_images(crops, config.detection.stitch_gap_px),
+        source_file=mark_scheme_pdf,
+        context=f"markscheme_output:{question_number}",
+    )
+    stitched.save(output_path)
+    return output_path, debug_paths
 
 
 def _find_mapping_override(question_pdf: Path, mark_schemes_dir: Path, mappings_dir: Path | None) -> Path | None:
@@ -555,8 +613,6 @@ def _detect_mark_scheme_tables(
 ) -> dict[int, MarkSchemeTable]:
     tables: dict[int, MarkSchemeTable] = {}
     for layout in layouts:
-        if layout.page_number < 6:
-            continue
         header_geometry = _mark_scheme_header_geometry(words_by_page.get(layout.page_number, []) if words_by_page else [])
         header_blocks = _mark_scheme_header_blocks(layout) if header_geometry is None else []
         header_detected = header_geometry.header_detected if header_geometry else _header_terms(header_blocks)
@@ -769,6 +825,8 @@ def _detect_table_question_anchors(
                 continue
             if block.bbox.x0 > q_col_right:
                 continue
+            if not _is_plausible_question_anchor_bbox(block.bbox, table):
+                continue
             number = _parse_mark_scheme_question_cell(block.text, expected, expected_parents)
             if not number:
                 continue
@@ -849,11 +907,13 @@ def _detect_table_question_anchors_from_words(
         ]
         if not question_words:
             continue
+        bbox = _union_boxes([word.bbox for word in question_words])
+        if not _is_plausible_question_anchor_bbox(bbox, table):
+            continue
         text = _leading_question_label_text(question_words)
         number = _parse_mark_scheme_question_cell(text, expected, expected_parents)
         if not number:
             continue
-        bbox = _union_boxes([word.bbox for word in question_words])
         anchors.append(
             MarkSchemeAnchor(
                 question_number=number,
@@ -866,6 +926,12 @@ def _detect_table_question_anchors_from_words(
             )
         )
     return anchors
+
+
+def _is_plausible_question_anchor_bbox(bbox: BoundingBox, table: MarkSchemeTable) -> bool:
+    question_column_width = max(20.0, table.question_col_right - table.bbox.x0)
+    max_anchor_x0 = table.bbox.x0 + min(42.0, question_column_width * 0.6)
+    return bbox.x0 <= max_anchor_x0
 
 
 def _leading_question_label_text(words: list[MarkSchemeWord]) -> str:
@@ -1182,62 +1248,13 @@ def _mark_total_for_question_block(
     next_anchor: MarkSchemeAnchor | None,
     tables: dict[int, MarkSchemeTable],
     words_by_page: dict[int, list[MarkSchemeWord]] | None = None,
+    expected_total: int | None = None,
 ) -> int | None:
     if words_by_page:
-        criteria_total = 0
-        mark_entries: list[tuple[int, float, bool, int, str]] = []
-        found = False
-        for layout in layouts:
-            if layout.page_number < anchor.page_number:
-                continue
-            if next_anchor and layout.page_number > next_anchor.page_number:
-                continue
-            table = tables.get(layout.page_number)
-            if not table:
-                continue
-            top = anchor.y0 if layout.page_number == anchor.page_number else table.header_bottom
-            top_tolerance = 4.0 if layout.page_number == anchor.page_number else 0.0
-            bottom = next_anchor.y0 if next_anchor and layout.page_number == next_anchor.page_number else table.bbox.y1
-            if (
-                next_anchor
-                and layout.page_number == next_anchor.page_number
-                and layout.page_number != anchor.page_number
-                and bottom <= table.header_bottom + 20
-            ):
-                continue
-            rows = _group_words_by_row(
-                [
-                    word
-                    for word in words_by_page.get(layout.page_number, [])
-                    if word.bbox.y0 >= top - top_tolerance
-                    and word.bbox.y1 <= bottom
-                    and table.bbox.x0 - 4 <= word.bbox.x0 <= table.bbox.x1 + 4
-                ],
-                tolerance=5.0,
-            )
-            for row in rows:
-                full_text = " ".join(word.text for word in row)
-                if _is_mark_scheme_boilerplate(full_text):
-                    continue
-                if re.search(r"\balternative\s+method\b", full_text, re.IGNORECASE):
-                    continue
-                marks_cell = " ".join(
-                    word.text
-                    for word in row
-                    if table.marks_col_left <= _box_center_x(word.bbox) <= table.marks_col_right
-                )
-                marks = _marks_from_marks_cell(marks_cell)
-                if marks:
-                    if _is_standalone_total_row(row, table, marks_cell):
-                        mark_entries.append((layout.page_number, min(word.bbox.y0 for word in row), True, sum(marks), full_text))
-                    else:
-                        criteria_total += sum(marks)
-                        mark_entries.append((layout.page_number, min(word.bbox.y0 for word in row), False, sum(marks), full_text))
-                    found = True
-        if not found:
+        rows = _table_rows_for_question_block(layouts, anchor, next_anchor, tables, words_by_page)
+        if not rows:
             return None
-        standalone_total = _sum_terminal_standalone_mark_rows(mark_entries)
-        return standalone_total if standalone_total is not None else criteria_total
+        return _mark_total_from_rows(rows, parent_question_id(anchor.question_number), expected_total)
 
     total = 0
     found = False
@@ -1274,6 +1291,15 @@ def _is_standalone_total_row(row: list[MarkSchemeWord], table: MarkSchemeTable, 
     return True
 
 
+def _standalone_total_row_value(row: list[MarkSchemeWord], table: MarkSchemeTable, marks_cell: str) -> int | None:
+    if not _is_standalone_total_row(row, table, marks_cell):
+        return None
+    try:
+        return int(marks_cell.strip())
+    except ValueError:
+        return None
+
+
 def _sum_terminal_standalone_mark_rows(entries: list[tuple[int, float, bool, int, str]]) -> int | None:
     standalone_total = 0
     found = False
@@ -1293,6 +1319,163 @@ def _starts_mark_scheme_question_label(text: str) -> bool:
     return bool(re.match(r"\s*\d{1,2}(?:\([a-h]\)|\((?:viii|vii|vi|iv|ix|iii|ii|i|v|x)\))", text, re.IGNORECASE))
 
 
+def _table_rows_for_question_block(
+    layouts: list[PageLayout],
+    anchor: MarkSchemeAnchor,
+    next_anchor: MarkSchemeAnchor | None,
+    tables: dict[int, MarkSchemeTable],
+    words_by_page: dict[int, list[MarkSchemeWord]],
+) -> list[MarkSchemeRow]:
+    rows_out: list[MarkSchemeRow] = []
+    for layout in layouts:
+        if layout.page_number < anchor.page_number:
+            continue
+        if next_anchor and layout.page_number > next_anchor.page_number:
+            continue
+        table = tables.get(layout.page_number)
+        if not table:
+            continue
+        top = anchor.y0 if layout.page_number == anchor.page_number else table.header_bottom
+        top_tolerance = 4.0 if layout.page_number == anchor.page_number else 0.0
+        bottom = next_anchor.y0 if next_anchor and layout.page_number == next_anchor.page_number else table.bbox.y1
+        if (
+            next_anchor
+            and layout.page_number == next_anchor.page_number
+            and layout.page_number != anchor.page_number
+            and bottom <= table.header_bottom + 20
+        ):
+            continue
+        rows = _group_words_by_row(
+            [
+                word
+                for word in words_by_page.get(layout.page_number, [])
+                if word.bbox.y0 >= top - top_tolerance
+                and word.bbox.y1 <= bottom
+                and table.bbox.x0 - 4 <= word.bbox.x0 <= table.bbox.x1 + 4
+            ],
+            tolerance=5.0,
+        )
+        for row in rows:
+            full_text = " ".join(word.text for word in row)
+            if _is_mark_scheme_boilerplate(full_text):
+                continue
+            if _is_mark_scheme_header_text(full_text):
+                continue
+            question_words = [
+                word
+                for word in row
+                if _box_center_x(word.bbox) <= table.question_col_right
+                and word.bbox.x0 <= min(table.question_col_right, table.bbox.x0 + 70)
+            ]
+            marks_cell = " ".join(
+                word.text
+                for word in row
+                if table.marks_col_left <= _box_center_x(word.bbox) <= table.marks_col_right
+            )
+            rows_out.append(
+                MarkSchemeRow(
+                    page_number=layout.page_number,
+                    y0=min(word.bbox.y0 for word in row),
+                    text=full_text,
+                    marks_cell=marks_cell,
+                    mark_values=tuple(_marks_from_marks_cell(marks_cell)),
+                    standalone_total=_standalone_total_row_value(row, table, marks_cell),
+                    question_label=_row_question_label_from_words(question_words),
+                )
+            )
+    return rows_out
+
+
+def _mark_total_from_rows(rows: list[MarkSchemeRow], parent_number: str, expected_total: int | None = None) -> int | None:
+    subpart_groups = _group_rows_by_subpart(rows, parent_number)
+    if subpart_groups:
+        candidate_groups = [_subpart_total_candidates(group_rows) for _label, group_rows in subpart_groups]
+        return _select_total_from_candidates(candidate_groups, expected_total)
+    candidate_groups = [_subpart_total_candidates(rows)]
+    return _select_total_from_candidates(candidate_groups, expected_total)
+
+
+def _group_rows_by_subpart(rows: list[MarkSchemeRow], parent_number: str) -> list[tuple[str, list[MarkSchemeRow]]]:
+    groups: list[tuple[str, list[MarkSchemeRow]]] = []
+    current_index: int | None = None
+    for row in rows:
+        label = row.question_label
+        if label and parent_question_id(label) == parent_number and label != parent_number:
+            current_index = next((index for index, (name, _rows) in enumerate(groups) if name == label), None)
+            if current_index is None:
+                groups.append((label, []))
+                current_index = len(groups) - 1
+        if current_index is not None:
+            groups[current_index][1].append(row)
+    return [(label, subpart_rows) for label, subpart_rows in groups if subpart_rows]
+
+
+def _subpart_total_candidates(rows: list[MarkSchemeRow]) -> list[int]:
+    branch_totals = [0]
+    explicit_totals: list[int] = []
+    current_branch = 0
+    for row in rows:
+        if _is_alternative_method_row(row.text):
+            if branch_totals[current_branch] > 0 or explicit_totals:
+                branch_totals.append(0)
+                current_branch = len(branch_totals) - 1
+            continue
+        if row.standalone_total is not None:
+            explicit_totals.append(row.standalone_total)
+            continue
+        if row.mark_values:
+            branch_totals[current_branch] += sum(row.mark_values)
+    candidates = explicit_totals or [total for total in branch_totals if total > 0]
+    if not candidates:
+        return []
+    return sorted(set(candidates))
+
+
+def _select_total_from_candidates(candidate_groups: list[list[int]], expected_total: int | None) -> int | None:
+    if not candidate_groups:
+        return None
+    if any(not candidates for candidates in candidate_groups):
+        return None
+    sums = [0]
+    for candidates in candidate_groups:
+        next_sums: set[int] = set()
+        for subtotal in sums:
+            for candidate in candidates:
+                next_sums.add(subtotal + candidate)
+        sums = sorted(next_sums)
+    if not sums:
+        return None
+    if expected_total is not None and expected_total in sums:
+        return expected_total
+    return max(sums)
+
+
+def _row_question_label_from_words(words: list[MarkSchemeWord]) -> str | None:
+    if not words:
+        return None
+    text = _leading_question_label_text(words)
+    if not _is_plausible_mark_scheme_label(text):
+        return None
+    return normalize_question_id(_clean_question_label_candidate(text))
+
+
+def _is_alternative_method_row(text: str) -> bool:
+    cleaned = " ".join(text.replace("\u00a0", " ").split())
+    cleaned = re.sub(
+        r"^\s*\d{1,2}(?:\([a-h]\)|\((?:viii|vii|vi|iv|ix|iii|ii|i|v|x)\))?\s*",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    return bool(
+        re.match(
+            r"^(?:alternative(?:\s+method(?:\s+for\s+question\b.*)?)?|method\s*[23]\b|either\b|or\b)",
+            cleaned,
+            re.IGNORECASE,
+        )
+    )
+
+
 def _marks_from_marks_cell(text: str) -> list[int]:
     cleaned = " ".join(text.replace("\u00a0", " ").split())
     if re.search(r"marks|guidance|answer|question", cleaned, re.IGNORECASE):
@@ -1309,14 +1492,7 @@ def _marks_from_marks_cell(text: str) -> list[int]:
     ]
     if coded_values:
         return coded_values
-    if re.search(r"[A-Za-z]", cleaned):
-        return []
-    values: list[int] = []
-    for match in re.finditer(r"(?<!\d)(?:[MBACE]\s*)?(\d{1,2})(?!\d)", cleaned, re.IGNORECASE):
-        value = int(match.group(1))
-        if 0 < value <= 15:
-            values.append(value)
-    return values
+    return []
 
 
 def _validate_mark_scheme_mapping(
@@ -1348,13 +1524,12 @@ def _validate_mark_scheme_mapping(
         validation_flags.append("missing_subparts")
         return validation_flags, "missing_subparts"
     extra_markscheme_subparts = [part for part in markscheme_subparts if part not in question_subparts]
-    question_marks_reliable = not extra_markscheme_subparts
+    if extra_markscheme_subparts:
+        validation_flags.append("question_subparts_incomplete")
+        return validation_flags, "question_subparts_incomplete"
     if question_marks_total is None or markscheme_marks_total is None or question_marks_total != markscheme_marks_total:
-        if not question_marks_reliable and markscheme_marks_total is not None:
-            validation_flags.append("question_subparts_incomplete")
-        else:
-            validation_flags.append("marks_total_mismatch")
-            return validation_flags, "marks_total_mismatch"
+        validation_flags.append("marks_total_mismatch")
+        return validation_flags, "marks_total_mismatch"
     if _block_contains_adjacent_question(canonical_number, regions, anchor, next_anchor):
         validation_flags.append("adjacent_question_block_selected")
         return validation_flags, "adjacent_question_block_selected"
@@ -1426,10 +1601,21 @@ def _blocks_for_table_anchor_bounds(
                 continue
             if not (table.bbox.x0 - 5 <= block.bbox.x0 <= table.bbox.x1 + 5):
                 continue
+            if _is_mark_scheme_header_text(block.text):
+                continue
             if _is_footer_or_header_box(block.bbox, layout, config) or _is_mark_scheme_boilerplate(block.text):
                 continue
             blocks.append(block)
     return sorted(blocks, key=lambda block: (block.page_number, block.bbox.y0, block.bbox.x0))
+
+
+def _is_mark_scheme_header_text(text: str) -> bool:
+    cleaned = " ".join(text.replace("\u00a0", " ").split())
+    return bool(re.search(r"\bQuestion\b", cleaned, re.IGNORECASE)) and bool(
+        re.search(r"\bAnswer\b", cleaned, re.IGNORECASE)
+    ) and bool(re.search(r"\bMarks\b", cleaned, re.IGNORECASE)) and bool(
+        re.search(r"\bGuidance\b", cleaned, re.IGNORECASE)
+    )
 
 
 def _mark_scheme_regions_for_start(

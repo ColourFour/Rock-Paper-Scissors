@@ -11,6 +11,7 @@ from exam_bank.mark_schemes import (
     _blocks_for_table_anchor_bounds,
     _detect_mark_scheme_tables,
     _detect_table_question_anchors,
+    _detect_table_question_anchors_from_words,
     _detected_subparts_for_question,
     _mark_total_for_question_block,
     _marks_from_marks_cell,
@@ -77,6 +78,173 @@ def test_detect_question_spans_groups_subparts_under_top_level_question() -> Non
     assert "2 Differentiate" not in spans[0].combined_text
 
 
+def test_detect_question_spans_rescue_subpart_from_mixed_page_furniture_on_continuation_page() -> None:
+    config = AppConfig()
+    layouts = [
+        PageLayout(
+            page_number=1,
+            width=595,
+            height=842,
+            blocks=[
+                block(1, "6 (a) Solve the equation. [3]", 100),
+                block(1, "........................................", 150, x=72),
+            ],
+        ),
+        PageLayout(
+            page_number=2,
+            width=595,
+            height=842,
+            blocks=[
+                block(2, "© UCLES 2025(b) Hence find the second value. [2]", 32),
+                block(2, "7 Start of next question. [4]", 220),
+            ],
+        ),
+    ]
+
+    spans = detect_question_spans(layouts, Path("paper_qp.pdf"), config)
+
+    assert len(spans) == 2
+    assert spans[0].question_number == "6"
+    assert spans[0].full_question_label == "6(a)-(b)"
+    assert "(b) Hence find the second value. [2]" in spans[0].combined_text
+    assert "7 Start of next question" not in spans[0].combined_text
+
+
+def test_detect_question_spans_flags_gap_when_middle_subpart_is_missing() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "7 (a) First part. [2]", 100),
+            block(1, "(c) Third part. [4]", 180, x=72),
+            block(1, "8 Next question. [3]", 260),
+        ],
+    )
+
+    span = detect_question_spans([layout], Path("paper_qp.pdf"), config)[0]
+
+    assert span.full_question_label == "7(a),(c)"
+    assert "question_subpart_sequence_gap" in span.review_flags
+    assert "question_scope_incomplete" in span.review_flags
+
+
+def test_detect_question_spans_excludes_previous_tail_and_centered_page_number_from_new_question() -> None:
+    config = AppConfig()
+    layouts = [
+        PageLayout(
+            page_number=1,
+            width=595,
+            height=842,
+            blocks=[
+                block(1, "2 (a) Earlier question. [3]", 100),
+                block(1, "(b) Earlier continuation. [2]", 180, x=72),
+            ],
+        ),
+        PageLayout(
+            page_number=2,
+            width=595,
+            height=842,
+            blocks=[
+                block(2, "(b) ............................................................................................", 42, x=8),
+                block(2, "5", 48, x=292),
+                block(2, "3", 73, x=50),
+                block(2, "The real start of question 3. [4]", 241, x=72),
+                block(2, "(a) First part. [2]", 293, x=72),
+                block(2, "4 Next question. [3]", 420, x=50),
+            ],
+        ),
+    ]
+
+    spans = detect_question_spans(layouts, Path("paper_qp.pdf"), config)
+    q3 = next(span for span in spans if span.question_number == "3")
+
+    assert "(b) ................................................................" not in q3.combined_text
+    assert "\n5\n" not in f"\n{q3.combined_text}\n"
+    assert "The real start of question 3." in q3.combined_text
+
+
+def test_detect_question_spans_keeps_later_subpart_below_answer_lines() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "3 (a) Find x. [4]", 90),
+            block(1, "(b) Hence find y. [2]", 520, x=72),
+            block(1, "4 Next question. [3]", 700, x=50),
+        ],
+        graphics=[hline(y, x0=95, x1=555) for y in range(180, 421, 26)],
+    )
+
+    spans = detect_question_spans([layout], Path("paper_qp.pdf"), config)
+    q3 = next(span for span in spans if span.question_number == "3")
+
+    assert q3.full_question_label == "3(a)-(b)"
+    assert "(b) Hence find y. [2]" in q3.combined_text
+
+
+def test_detect_question_spans_preserves_top_continuation_on_continuation_page() -> None:
+    config = AppConfig()
+    layouts = [
+        PageLayout(
+            page_number=1,
+            width=595,
+            height=842,
+            blocks=[
+                block(1, "3 Intro part. [3]", 90),
+                block(1, "(a) First part. [3]", 260, x=72),
+            ],
+        ),
+        PageLayout(
+            page_number=2,
+            width=595,
+            height=842,
+            blocks=[
+                block(2, "© UCLES 2025(b) Wrong rescued continuation. [2]", 32, x=50),
+                block(2, "4 Next question. [4]", 63, x=50),
+            ],
+        ),
+    ]
+
+    spans = detect_question_spans(layouts, Path("paper_qp.pdf"), config)
+    q3 = next(span for span in spans if span.question_number == "3")
+
+    assert "Wrong rescued continuation" in q3.combined_text
+
+
+def test_detect_question_spans_preserves_out_of_order_top_continuation_on_continuation_page() -> None:
+    config = AppConfig()
+    layouts = [
+        PageLayout(
+            page_number=1,
+            width=595,
+            height=842,
+            blocks=[
+                block(1, "6 Question intro. [1]", 90),
+                block(1, "(a) First part. [4]", 180, x=72),
+            ],
+        ),
+        PageLayout(
+            page_number=2,
+            width=595,
+            height=842,
+            blocks=[
+                block(2, "DO NOT WRITE IN THIS MARGIN (d) Wrong top continuation. [1]", 32, x=6),
+                block(2, "(c) Real later part. [3]", 63, x=72),
+            ],
+        ),
+    ]
+
+    spans = detect_question_spans(layouts, Path("paper_qp.pdf"), config)
+    q6 = next(span for span in spans if span.question_number == "6")
+
+    assert "Wrong top continuation" in q6.combined_text
+    assert "(c) Real later part. [3]" in q6.combined_text
+
+
 def test_extract_marks_sums_bracketed_marks() -> None:
     assert extract_marks_from_text("Find x. [2]\nHence find y. [3]") == 5
     assert extract_marks_from_text("No mark shown") is None
@@ -132,7 +300,7 @@ def test_mark_scheme_table_mapping_merges_blank_question_number_continuation_row
     assert regions[0].continuation_rows_included
 
 
-def test_mark_scheme_answer_table_before_page_6_is_rejected() -> None:
+def test_mark_scheme_answer_table_may_start_on_page_5_when_header_is_valid() -> None:
     config = AppConfig()
     layout = PageLayout(
         page_number=5,
@@ -148,7 +316,7 @@ def test_mark_scheme_answer_table_before_page_6_is_rejected() -> None:
         ],
     )
 
-    assert _detect_mark_scheme_tables([layout], config) == {}
+    assert list(_detect_mark_scheme_tables([layout], config)) == [5]
 
 
 def test_question_id_normalization_preserves_subparts() -> None:
@@ -417,6 +585,48 @@ def test_mark_scheme_mapping_rejects_missing_subpart_and_marks_mismatch() -> Non
     assert reason == "marks_total_mismatch"
 
 
+def test_mark_scheme_mapping_rejects_question_scope_smaller_than_markscheme_scope() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=6,
+        width=595,
+        height=842,
+        blocks=[
+            cell(6, "Question", 100, x=45, width=55),
+            cell(6, "Answer", 100, x=130, width=50),
+            cell(6, "Marks", 100, x=390, width=45),
+            cell(6, "Guidance", 100, x=455, width=65),
+            cell(6, "7(a)", 135, x=50, width=35),
+            cell(6, "Part a answer", 135, x=130, width=100),
+            cell(6, "B1", 135, x=390, width=25),
+            cell(6, "7(b)", 170, x=50, width=35),
+            cell(6, "Part b answer", 170, x=130, width=100),
+            cell(6, "M1", 170, x=390, width=25),
+            cell(6, "8", 220, x=50, width=10),
+            cell(6, "Next question", 220, x=130, width=100),
+        ],
+    )
+
+    tables = _detect_mark_scheme_tables([layout], config)
+    anchors = _detect_table_question_anchors([layout], tables, config, ["7", "8"])
+    regions, flags = _table_regions_for_anchor([layout], tables, anchors[0], anchors[-1], config)
+
+    validation_flags, reason = _validate_mark_scheme_mapping(
+        "7",
+        ["a"],
+        ["a", "b"],
+        1,
+        2,
+        anchors[0],
+        anchors[-1],
+        regions,
+        flags,
+    )
+
+    assert validation_flags == ["question_subparts_incomplete"]
+    assert reason == "question_subparts_incomplete"
+
+
 def test_mark_scheme_mark_total_sums_standalone_subpart_totals_after_alternatives() -> None:
     table = MarkSchemeTable(
         page_number=6,
@@ -464,6 +674,169 @@ def test_mark_scheme_mark_total_sums_standalone_subpart_totals_after_alternative
 def test_mark_scheme_marks_cell_prefers_mark_codes_over_answer_digits() -> None:
     assert _marks_from_marks_cell("8x2 ± 2x M1") == [1]
     assert _marks_from_marks_cell("Page 10 of 21") == []
+    assert _marks_from_marks_cell("8") == []
+
+
+def test_mark_scheme_mark_total_ignores_answer_digits_spilling_into_marks_column() -> None:
+    table = MarkSchemeTable(
+        page_number=6,
+        bbox=BoundingBox(40, 50, 540, 430),
+        question_col_right=120,
+        marks_col_left=350,
+        marks_col_right=420,
+        header_bottom=70,
+        confidence="high",
+        header_detected=["Question", "Answer", "Marks", "Guidance"],
+    )
+    layout = PageLayout(page_number=6, width=595, height=842, blocks=[])
+    words_by_page = {
+        6: [
+            ms_word(6, "6", 60, 90),
+            ms_word(6, "B1", 360, 90),
+            ms_word(6, "B1", 360, 110),
+            ms_word(6, "B1", 360, 130),
+            ms_word(6, "B1", 360, 150),
+            ms_word(6, "M1", 360, 170),
+            ms_word(6, "A1", 360, 190),
+            ms_word(6, "continued", 180, 210),
+            ms_word(6, "8", 360, 210),
+        ]
+    }
+    anchor = MarkSchemeAnchor("6", 6, 90, 102, 60, "6", table)
+
+    mark_total = _mark_total_for_question_block([layout], anchor, None, {6: table}, words_by_page)
+
+    assert mark_total == 6
+
+
+def test_mark_scheme_mark_total_treats_alternative_methods_as_parallel_branches() -> None:
+    table = MarkSchemeTable(
+        page_number=6,
+        bbox=BoundingBox(40, 50, 540, 430),
+        question_col_right=120,
+        marks_col_left=350,
+        marks_col_right=420,
+        header_bottom=70,
+        confidence="high",
+        header_detected=["Question", "Answer", "Marks", "Guidance"],
+    )
+    layout = PageLayout(page_number=6, width=595, height=842, blocks=[])
+    words_by_page = {
+        6: [
+            ms_word(6, "9(a)", 60, 90),
+            ms_word(6, "B1", 360, 90),
+            ms_word(6, "M1", 360, 110),
+            ms_word(6, "A1", 360, 130),
+            ms_word(6, "9(a)", 60, 160),
+            ms_word(6, "Alternative", 150, 160, width=60),
+            ms_word(6, "Method", 220, 160, width=50),
+            ms_word(6, "B1", 360, 185),
+            ms_word(6, "M1", 360, 205),
+            ms_word(6, "A1", 360, 225),
+            ms_word(6, "3", 360, 255),
+        ]
+    }
+    anchor = MarkSchemeAnchor("9(a)", 6, 90, 102, 60, "9(a)", table)
+
+    mark_total = _mark_total_for_question_block([layout], anchor, None, {6: table}, words_by_page)
+
+    assert mark_total == 3
+
+
+def test_mark_scheme_alternative_form_explanatory_text_does_not_start_new_branch() -> None:
+    table = MarkSchemeTable(
+        page_number=6,
+        bbox=BoundingBox(40, 50, 540, 430),
+        question_col_right=120,
+        marks_col_left=350,
+        marks_col_right=420,
+        header_bottom=70,
+        confidence="high",
+        header_detected=["Question", "Answer", "Marks", "Guidance"],
+    )
+    layout = PageLayout(page_number=6, width=595, height=842, blocks=[])
+    words_by_page = {
+        6: [
+            ms_word(6, "10(a)", 60, 90),
+            ms_word(6, "B1", 360, 90),
+            ms_word(6, "Alternative", 170, 115, width=70),
+            ms_word(6, "form:", 250, 115, width=45),
+            ms_word(6, "M1", 360, 135),
+            ms_word(6, "A1", 360, 155),
+            ms_word(6, "A1", 360, 175),
+            ms_word(6, "A1", 360, 195),
+            ms_word(6, "A1", 360, 215),
+        ]
+    }
+    anchor = MarkSchemeAnchor("10(a)", 6, 90, 102, 60, "10(a)", table)
+
+    mark_total = _mark_total_for_question_block([layout], anchor, None, {6: table}, words_by_page)
+
+    assert mark_total == 5
+
+
+def test_mark_scheme_method2_heading_starts_parallel_branch_not_additive_total() -> None:
+    table = MarkSchemeTable(
+        page_number=6,
+        bbox=BoundingBox(40, 50, 540, 430),
+        question_col_right=120,
+        marks_col_left=350,
+        marks_col_right=420,
+        header_bottom=70,
+        confidence="high",
+        header_detected=["Question", "Answer", "Marks", "Guidance"],
+    )
+    layout = PageLayout(page_number=6, width=595, height=842, blocks=[])
+    words_by_page = {
+        6: [
+            ms_word(6, "5(a)", 60, 90),
+            ms_word(6, "B1", 360, 90),
+            ms_word(6, "M1", 360, 110),
+            ms_word(6, "Method", 150, 140, width=55),
+            ms_word(6, "2", 210, 140, width=10),
+            ms_word(6, "B1", 360, 165),
+            ms_word(6, "M1", 360, 185),
+            ms_word(6, "2", 360, 215),
+        ]
+    }
+    anchor = MarkSchemeAnchor("5(a)", 6, 90, 102, 60, "5(a)", table)
+
+    mark_total = _mark_total_for_question_block([layout], anchor, None, {6: table}, words_by_page)
+
+    assert mark_total == 2
+
+
+def test_mark_scheme_mark_total_sums_subpart_caps_instead_of_additive_paths() -> None:
+    table = MarkSchemeTable(
+        page_number=6,
+        bbox=BoundingBox(40, 50, 540, 430),
+        question_col_right=120,
+        marks_col_left=350,
+        marks_col_right=420,
+        header_bottom=70,
+        confidence="high",
+        header_detected=["Question", "Answer", "Marks", "Guidance"],
+    )
+    layout = PageLayout(page_number=6, width=595, height=842, blocks=[])
+    words_by_page = {
+        6: [
+            ms_word(6, "8(a)", 60, 90),
+            ms_word(6, "B1", 360, 90),
+            ms_word(6, "M1", 360, 110),
+            ms_word(6, "A1", 360, 130),
+            ms_word(6, "3", 360, 150),
+            ms_word(6, "8(b)", 60, 190),
+            ms_word(6, "B1", 360, 190),
+            ms_word(6, "M1", 360, 210),
+            ms_word(6, "2", 360, 230),
+        ]
+    }
+    anchor = MarkSchemeAnchor("8(a)", 6, 90, 102, 60, "8(a)", table)
+    next_anchor = MarkSchemeAnchor("9(a)", 6, 270, 282, 60, "9(a)", table)
+
+    mark_total = _mark_total_for_question_block([layout], anchor, next_anchor, {6: table}, words_by_page)
+
+    assert mark_total == 5
 
 
 def test_mark_scheme_table_detection_ignores_earlier_non_answer_table() -> None:
@@ -640,11 +1013,70 @@ def test_mark_scheme_text_uses_same_anchor_bounds_as_image_crop() -> None:
     assert "Next answer row" not in text
 
 
+def test_mark_scheme_text_excludes_repeated_table_header_rows() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=6,
+        width=595,
+        height=842,
+        blocks=[
+            cell(6, "Question", 100, x=45, width=55),
+            cell(6, "Answer", 100, x=130, width=50),
+            cell(6, "Marks", 100, x=390, width=45),
+            cell(6, "Guidance", 100, x=455, width=65),
+            cell(6, "1", 135, x=50, width=10),
+            cell(6, "Target answer", 135, x=130, width=120),
+            cell(6, "B1", 135, x=390, width=25),
+            cell(6, "Question  Answer  Marks  Guidance", 170, x=45, width=260),
+            cell(6, "2", 230, x=50, width=10),
+            cell(6, "Next answer", 230, x=130, width=120),
+        ],
+    )
+
+    tables = _detect_mark_scheme_tables([layout], config)
+    anchors = _detect_table_question_anchors([layout], tables, config, ["1", "2"])
+    text_blocks = _blocks_for_table_anchor_bounds([layout], tables, anchors[0], anchors[1], config)
+    text = "\n".join(block.text for block in text_blocks)
+
+    assert "Target answer" in text
+    assert "Question  Answer  Marks  Guidance" not in text
+
+
 def test_question_subparts_preserve_roman_and_alpha_labels() -> None:
     text = "8 (i) First. [2]\n(ii) Second. [1]\n(iii) Third. [3]\n(iv) Fourth. [4]"
 
     assert _question_subparts_from_text(text) == ["i", "ii", "iii", "iv"]
     assert _question_subparts_from_text("7 (a) First. [5]\n(b) Second. [3]") == ["a", "b"]
+    assert _question_subparts_from_text("9 (a)(i) Show that ... [3]\n(ii) Hence ... [2]\n(b) Final part. [4]") == ["a", "b"]
+    assert _question_subparts_from_text("Find P(X = i) and compare with (ii) from the formula sheet.") == []
+
+
+def test_mark_scheme_word_anchor_detection_rejects_far_right_false_boundary_row() -> None:
+    table = MarkSchemeTable(
+        page_number=6,
+        bbox=BoundingBox(64, 50, 784, 530),
+        question_col_right=140,
+        marks_col_left=424,
+        marks_col_right=528,
+        header_bottom=70,
+        confidence="high",
+        header_detected=["Question", "Answer", "Marks", "Guidance"],
+    )
+
+    words = [
+        ms_word(6, "1", 92, 80, width=8),
+        ms_word(6, "B1", 500, 80, width=18),
+        ms_word(6, "1", 127, 121, width=8),
+        ms_word(6, "M1", 498, 121, width=18),
+        ms_word(6, "2", 127, 137, width=8),
+        ms_word(6, "5", 319, 137, width=8),
+        ms_word(6, "2", 92, 301, width=8),
+        ms_word(6, "B1", 500, 301, width=18),
+    ]
+
+    anchors = _detect_table_question_anchors_from_words(words, table, {"1", "2"}, {"1", "2"})
+
+    assert [(anchor.question_number, round(anchor.y0)) for anchor in anchors] == [("1", 80), ("2", 301)]
 
 
 def test_record_json_schema_contains_required_fields(tmp_path: Path) -> None:

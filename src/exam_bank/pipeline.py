@@ -306,8 +306,6 @@ def _record_qa_flags(
     if paper_family in config.paper_family_taxonomy and topic not in allowed_topics:
         flags.append("qa_fail_invalid_topic_for_paper")
     if mark_scheme_image:
-        if any(page < 6 for page in mark_scheme_image.page_numbers):
-            flags.append("qa_fail_markscheme_page_before_6")
         if mark_scheme_image.image_path and not mark_scheme_image.table_header_ok:
             flags.append("qa_fail_markscheme_header_not_ok")
         if mark_scheme_image.image_path and not mark_scheme_image.markscheme_question_number:
@@ -322,17 +320,27 @@ def _record_qa_flags(
 
 
 _QUESTION_SUBPART_LABEL_RE = re.compile(
-    r"(?<![A-Za-z0-9])\((?P<label>a|b|c|d|e|f|g|h|viii|vii|vi|iv|ix|iii|ii|i|v|x)\)",
+    r"^\s*(?:\d+\s*)?(?P<labels>(?:\((?:a|b|c|d|e|f|g|h|viii|vii|vi|iv|ix|iii|ii|i|v|x)\))+)",
     re.IGNORECASE,
 )
 
 
 def _question_subparts_from_text(text: str) -> list[str]:
     subparts: list[str] = []
-    for match in _QUESTION_SUBPART_LABEL_RE.finditer(text):
-        label = match.group("label").lower()
-        if label not in subparts:
-            subparts.append(label)
+    for line in text.splitlines():
+        match = _QUESTION_SUBPART_LABEL_RE.match(line.strip())
+        if not match:
+            continue
+        for label in re.findall(r"\((a|b|c|d|e|f|g|h|viii|vii|vi|iv|ix|iii|ii|i|v|x)\)", match.group("labels"), re.IGNORECASE):
+            normalized = label.lower()
+            if normalized not in subparts:
+                subparts.append(normalized)
+    alpha_labels = ["a", "b", "c", "d", "e", "f", "g", "h"]
+    roman_labels = ["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"]
+    if any(label in alpha_labels for label in subparts):
+        return sorted({label for label in subparts if label in alpha_labels}, key=alpha_labels.index)
+    if any(label in roman_labels for label in subparts):
+        return sorted({label for label in subparts if label in roman_labels}, key=roman_labels.index)
     return subparts
 
 

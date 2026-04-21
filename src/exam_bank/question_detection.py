@@ -70,6 +70,7 @@ def detect_question_spans(layouts: list[PageLayout], source_pdf: str | Path, con
         if next_start and int(next_start.question_number) > int(start.question_number) + 1:
             flags.append("question_sequence_gap")
         flags.extend(_validate_span_blocks(start, blocks, layouts, config))
+        flags.extend(_subpart_sequence_flags(blocks))
 
         full_label = _infer_full_label(start.question_number, blocks)
         spans.append(
@@ -215,23 +216,52 @@ def _blocks_within_span(
 ) -> tuple[list[TextBlock], list[str]]:
     selected: list[TextBlock] = []
     flags: list[str] = []
+    current_question_has_subparts = False
+    page_flags: list[str] = []
     for page in layouts:
         if page.page_number < start_page or page.page_number > end_page:
             continue
-        top = start_y if page.page_number == start_page else config.detection.crop_top_margin
+        top = start_y if page.page_number == start_page else 0.0
         bottom = end_y if page.page_number == end_page else page.height - config.detection.crop_bottom_margin
         effective_bottom, boundary_flags = _effective_question_bottom(page, top, bottom, config)
         bottom = effective_bottom
         flags.extend(boundary_flags)
         answer_rule_bands = _answer_rule_y_bands(page)
-        for block in page.blocks:
-            if block.bbox.y1 >= top and block.bbox.y0 < bottom:
-                parsed = parse_question_start(block.first_line, config)
-                if parsed and max_question_number is not None and int(parsed[0]) > max_question_number:
-                    flags.append("impossible_question_number_anchor_excluded")
-                    continue
-                if _is_question_content_block(block, page, config, answer_rule_bands=answer_rule_bands):
-                    selected.append(block)
+        pending_rescues: list[TextBlock] = []
+        page_selected: list[TextBlock] = []
+        for block in sorted(page.blocks, key=lambda item: (item.bbox.y0, item.bbox.x0)):
+            top_tolerance = 4.0 if page.page_number == start_page else 0.0
+            if block.bbox.y0 < top - top_tolerance or block.bbox.y0 >= bottom:
+                continue
+            parsed = parse_question_start(block.first_line, config)
+            if parsed and max_question_number is not None and int(parsed[0]) > max_question_number:
+                flags.append("impossible_question_number_anchor_excluded")
+                continue
+            if _is_question_content_block(block, page, config, answer_rule_bands=answer_rule_bands):
+                page_selected.append(block)
+                current_question_has_subparts = current_question_has_subparts or _block_has_subpart_label(block)
+                if current_question_has_subparts and pending_rescues:
+                    page_selected.extend(_flush_pending_rescues(pending_rescues, page_selected))
+                    pending_rescues = []
+                continue
+            rescued = _rescued_continuation_block(block, page, config, answer_rule_bands=answer_rule_bands)
+            if rescued is not None:
+                if current_question_has_subparts:
+                    page_selected.extend(_flush_pending_rescues([rescued], page_selected))
+                else:
+                    pending_rescues.append(rescued)
+        if current_question_has_subparts and pending_rescues:
+            page_selected.extend(_flush_pending_rescues(pending_rescues, page_selected))
+        page_selected, suspicious_flags = _filter_suspicious_rescued_continuations(
+            page_selected,
+            page,
+            bottom,
+            config,
+            is_start_page=page.page_number == start_page,
+        )
+        selected.extend(page_selected)
+        page_flags.extend(suspicious_flags)
+    flags.extend(page_flags)
     return sorted(selected, key=lambda block: (block.page_number, block.bbox.y0, block.bbox.x0)), sorted(set(flags))
 
 
@@ -302,20 +332,15 @@ def _validate_span_blocks(
 
 
 def _infer_full_label(question_number: str, blocks: list[TextBlock]) -> str:
-    labels: list[str] = []
-    for block in blocks:
-        match = SUBPART_RE.match(block.first_line)
-        if not match:
-            continue
-        label = match.group("label").lower()
-        if label not in labels:
-            labels.append(label)
+    labels = _ordered_subpart_labels(blocks)
 
     if not labels:
         return question_number
     if len(labels) == 1:
-        return f"{question_number}{labels[0]}"
-    return f"{question_number}{labels[0]}-{labels[-1]}"
+        return f"{question_number}({labels[0]})"
+    if _has_subpart_sequence_gap(labels):
+        return f"{question_number}" + ",".join(f"({label})" for label in labels)
+    return f"{question_number}({labels[0]})-({labels[-1]})"
 
 
 def _layout_by_number(layouts: list[PageLayout], page_number: int) -> PageLayout:
@@ -480,8 +505,20 @@ def _is_question_content_block(
 
     if text.isdigit() and (block.bbox.y0 < config.detection.crop_top_margin or block.bbox.y1 > page.height - config.detection.bottom_margin):
         return False
+    if _is_centered_page_number_block(block, page, config):
+        return False
 
     return True
+
+
+def _is_centered_page_number_block(block: TextBlock, page: PageLayout, config: AppConfig) -> bool:
+    text = _clean_text_line(block.text)
+    if not text.isdigit():
+        return False
+    if block.bbox.y0 > config.detection.min_question_start_y:
+        return False
+    center_x = (block.bbox.x0 + block.bbox.x1) / 2
+    return page.width * 0.35 <= center_x <= page.width * 0.65
 
 
 def _is_footer_or_header_block(block: TextBlock, page: PageLayout, config: AppConfig) -> bool:
@@ -585,11 +622,16 @@ def _effective_question_bottom(
     config: AppConfig,
 ) -> tuple[float, list[str]]:
     candidates: list[tuple[float, str]] = []
+    answer_rule_bands = _answer_rule_y_bands(layout)
     for block in sorted(layout.blocks, key=lambda item: item.bbox.y0):
         if block.bbox.y0 <= top + 2 or block.bbox.y0 >= bottom:
             continue
         reason = _boilerplate_reason(block.text)
         if reason:
+            if block.bbox.y0 <= max(top + 20, config.detection.crop_top_margin + 8):
+                continue
+            if _rescued_continuation_block(block, layout, config, answer_rule_bands=answer_rule_bands) is not None:
+                continue
             candidates.append((block.bbox.y0, f"excluded_boilerplate_{reason}"))
 
     answer_start = _lined_answer_region_start(layout, top, bottom, config)
@@ -624,6 +666,16 @@ def _lined_answer_region_start(
 
     for run in runs:
         if len(run) >= 4 and run[-1] - run[0] >= 60:
+            later_subpart = any(
+                block.bbox.y0 > run[-1] + 45
+                and block.bbox.y0 < bottom
+                and SUBPART_RE.match(block.first_line.strip())
+                and not _is_answer_space_text(block.text)
+                and not _is_boilerplate_text(block.text)
+                for block in layout.blocks
+            )
+            if later_subpart:
+                continue
             text_after = [
                 block
                 for block in layout.blocks
@@ -649,9 +701,176 @@ def _is_in_answer_rule_band(box: BoundingBox, bands: list[float]) -> bool:
     return any(abs(y_mid - band) <= 2.5 for band in bands)
 
 
+def _rescued_continuation_block(
+    block: TextBlock,
+    page: PageLayout,
+    config: AppConfig,
+    *,
+    answer_rule_bands: list[float] | None = None,
+) -> TextBlock | None:
+    text = _clean_text_line(block.text)
+    if not text:
+        return None
+    match = re.search(
+        r"(?P<label>\((?:a|b|c|d|e|f|g|h|viii|vii|vi|iv|ix|iii|ii|i|v|x)\))(?=\s*\S)",
+        text,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    rescued_text = text[match.start() :].strip()
+    if not rescued_text or _is_answer_space_text(rescued_text):
+        return None
+    rescued_block = TextBlock(
+        page_number=block.page_number,
+        text=rescued_text,
+        bbox=block.bbox,
+        source="rescued_continuation",
+        confidence=block.confidence,
+        font_size=block.font_size,
+        font_name=block.font_name,
+        is_bold=block.is_bold,
+    )
+    if _is_answer_space_text(rescued_text):
+        return None
+    if _is_control_artifact_text(rescued_text):
+        return None
+    if answer_rule_bands and _is_in_answer_rule_band(rescued_block.bbox, answer_rule_bands):
+        return None
+    return rescued_block
+
+
+def _filter_suspicious_rescued_continuations(
+    blocks: list[TextBlock],
+    page: PageLayout,
+    bottom: float,
+    config: AppConfig,
+    *,
+    is_start_page: bool,
+) -> tuple[list[TextBlock], list[str]]:
+    if not blocks or not is_start_page:
+        return blocks, []
+
+    flags: list[str] = []
+    later_question_starts = [
+        block
+        for block in page.blocks
+        if parse_question_start(block.first_line, config)
+        and _anchor_block_can_be_question_start(block, page, config)
+        and block.bbox.y0 <= bottom + config.detection.anchor_y_tolerance
+    ]
+    filtered: list[TextBlock] = []
+    subpart_blocks = [(block, _subpart_label_from_text(block.first_line)) for block in blocks if _subpart_label_from_text(block.first_line)]
+
+    for block in blocks:
+        if block.source != "rescued_continuation":
+            filtered.append(block)
+            continue
+
+        label = _subpart_label_from_text(block.first_line)
+        label_order = _subpart_sort_key(label) if label else None
+        top_band = block.bbox.y0 <= config.detection.crop_top_margin + 8
+
+        has_lower_later_subpart = any(
+            other is not block
+            and other.bbox.y0 > block.bbox.y0
+            and other_label is not None
+            and label_order is not None
+            and (_subpart_sort_key(other_label) or 0) < label_order
+            for other, other_label in subpart_blocks
+        )
+        if top_band and has_lower_later_subpart:
+            flags.append("suspicious_top_continuation_excluded")
+            continue
+
+        nearby_next_question = any(
+            other.bbox.y0 > block.bbox.y0
+            and other.bbox.y0 - block.bbox.y1 <= 40
+            for other in later_question_starts
+        )
+        if top_band and nearby_next_question:
+            flags.append("suspicious_top_continuation_excluded")
+            continue
+
+        filtered.append(block)
+
+    return filtered, flags
+
+
 def _clean_text_line(text: str) -> str:
     return " ".join(_strip_control_chars(text).replace("\u00a0", " ").split())
 
 
 def _strip_control_chars(text: str) -> str:
     return "".join(char if ord(char) >= 32 or char in "\n\t\r" else " " for char in text)
+
+
+def _block_has_subpart_label(block: TextBlock) -> bool:
+    if SUBPART_RE.match(block.first_line):
+        return True
+    parsed = QUESTION_START_RE.match(block.first_line.strip())
+    return bool(parsed and parsed.group("label"))
+
+
+def _flush_pending_rescues(pending: list[TextBlock], selected: list[TextBlock]) -> list[TextBlock]:
+    existing = {_subpart_label_from_text(block.first_line) for block in selected}
+    flushed: list[TextBlock] = []
+    for block in pending:
+        label = _subpart_label_from_text(block.first_line)
+        if label and label not in existing:
+            flushed.append(block)
+            existing.add(label)
+    return flushed
+
+
+def _ordered_subpart_labels(blocks: list[TextBlock]) -> list[str]:
+    labels: list[str] = []
+    for block in blocks:
+        label = _subpart_label_from_text(block.first_line)
+        if label and label not in labels:
+            labels.append(label)
+    sort_keys = [_subpart_sort_key(label) for label in labels]
+    if labels and all(key is not None for key in sort_keys):
+        return [label for label, _key in sorted(zip(labels, sort_keys), key=lambda item: item[1])]
+    return labels
+
+
+def _subpart_label_from_text(text: str) -> str | None:
+    match = SUBPART_RE.match(text)
+    if match:
+        return match.group("label").strip("()").lower()
+    parsed = QUESTION_START_RE.match(text.strip())
+    if parsed and parsed.group("label"):
+        labels = re.findall(r"\(([a-zivxlcdm]+)\)", parsed.group("label"), re.IGNORECASE)
+        if labels:
+            return labels[-1].lower()
+    return None
+
+
+def _subpart_sequence_flags(blocks: list[TextBlock]) -> list[str]:
+    labels = _ordered_subpart_labels(blocks)
+    if len(labels) < 2:
+        return []
+    flags: list[str] = []
+    if _has_subpart_sequence_gap(labels):
+        flags.append("question_subpart_sequence_gap")
+        flags.append("question_scope_incomplete")
+    return flags
+
+
+def _has_subpart_sequence_gap(labels: list[str]) -> bool:
+    positions = [_subpart_sort_key(label) for label in labels]
+    if any(position is None for position in positions):
+        return False
+    numeric_positions = [position for position in positions if position is not None]
+    return any(current - previous > 1 for previous, current in zip(numeric_positions, numeric_positions[1:]))
+
+
+def _subpart_sort_key(label: str) -> int | None:
+    alpha_labels = ["a", "b", "c", "d", "e", "f", "g", "h"]
+    roman_labels = ["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"]
+    if label in alpha_labels:
+        return alpha_labels.index(label) + 1
+    if label in roman_labels:
+        return roman_labels.index(label) + 1
+    return None
