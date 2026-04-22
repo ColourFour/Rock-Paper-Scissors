@@ -18,32 +18,39 @@ from .mark_schemes import MarkSchemeImageResult, extract_mark_scheme_answers, fi
 from .models import ClassificationResult, PageLayout, QuestionRecord, QuestionSpan
 from .pdf_extract import extract_pdf_layout
 from .question_detection import detect_question_anchor_candidates, detect_question_spans, extract_marks_from_text
-from .review import write_review_file
 
 
 @dataclass(frozen=True)
 class PipelineResult:
     records: list[QuestionRecord]
     json_path: Path
-    csv_path: Path
-    review_path: Path
+    output_root: Path
+
+
+def process_inputs(input_path: str | Path, config: AppConfig) -> PipelineResult:
+    config.ensure_output_dirs()
+    registry = build_document_registry(input_path, allowed_document_types=set(config.runtime.input_document_types))
+    return _process_registry_entries(registry, config)
 
 
 def process_batch(config: AppConfig) -> PipelineResult:
     config.ensure_output_dirs()
+    active_document_types = set(config.runtime.input_document_types)
+    source_paths: list[Path] = []
+    if config.runtime.supports_input_document_type("question_paper"):
+        source_paths.append(config.input.question_papers_dir)
+    if config.runtime.supports_input_document_type("mark_scheme"):
+        source_paths.append(config.input.mark_schemes_dir)
     registry = build_document_registry_from_paths(
-        [
-            config.input.question_papers_dir,
-            config.input.mark_schemes_dir,
-            config.input.examiner_reports_dir,
-        ]
+        source_paths,
+        allowed_document_types=active_document_types,
     )
     return _process_registry_entries(registry, config)
 
 
 def process_folder(folder: str | Path, config: AppConfig) -> PipelineResult:
     config.ensure_output_dirs()
-    registry = build_document_registry(folder)
+    registry = build_document_registry(folder, allowed_document_types=set(config.runtime.input_document_types))
     return _process_registry_entries(registry, config)
 
 
@@ -62,20 +69,20 @@ def _process_registry_entries(registry: DocumentRegistry, config: AppConfig) -> 
                 registry_warnings=entry.warnings,
             )
         )
-    json_path, csv_path = export_records(records, config)
-    review_path = write_review_file(records, config)
-    _write_batch_diagnostic(records, config)
-    return PipelineResult(records, json_path, csv_path, review_path)
+    json_path = export_records(records, config)
+    if config.debug.enabled:
+        _write_batch_diagnostic(records, config)
+    return PipelineResult(records, json_path, config.output.root_dir())
 
 
 def process_sample(question_pdf: str | Path, config: AppConfig, mark_scheme_pdf: str | Path | None = None) -> PipelineResult:
     config.ensure_output_dirs()
     records = build_records_for_pdf(question_pdf, config, mark_scheme_pdf=mark_scheme_pdf)
     basename = _safe_basename(Path(question_pdf).stem)
-    json_path, csv_path = export_records(records, config, basename=f"{basename}_sample")
-    review_path = write_review_file(records, config, basename=f"{basename}_sample")
-    _write_batch_diagnostic(records, config, basename=f"{basename}_sample")
-    return PipelineResult(records, json_path, csv_path, review_path)
+    json_path = export_records(records, config, basename=f"{basename}_sample")
+    if config.debug.enabled:
+        _write_batch_diagnostic(records, config, basename=f"{basename}_sample")
+    return PipelineResult(records, json_path, config.output.root_dir())
 
 
 def build_records_for_pdf(
@@ -94,7 +101,7 @@ def build_records_for_pdf(
     spans = detect_question_spans(layouts, question_pdf, config)
     expected_numbers = [span.question_number for span in spans if span.question_number.isdigit()]
     expected_marks = {span.question_number: extract_marks_from_text(span.combined_text) for span in spans if span.question_number.isdigit()}
-    expected_subparts = {span.question_number: _question_subparts_from_text(span.combined_text) for span in spans if span.question_number.isdigit()}
+    expected_subparts = {span.question_number: _question_subparts_from_span(span) for span in spans if span.question_number.isdigit()}
 
     matched_mark_scheme = Path(mark_scheme_pdf) if mark_scheme_pdf else find_mark_scheme(
         question_pdf,
@@ -132,13 +139,15 @@ def build_records_for_pdf(
         marks = extract_marks_from_text(question_text)
         answer_text = answers.get(span.question_number, "")
         mark_scheme_image = mark_scheme_images.get(span.question_number)
-        examiner_evidence = examiner_report_topic_evidence(
-            question_pdf,
-            config.input.examiner_reports_dir,
-            span.question_number,
-            config,
-            report_paths=examiner_report_paths,
-        )
+        examiner_evidence = None
+        if config.runtime.supports_input_document_type("examiner_report"):
+            examiner_evidence = examiner_report_topic_evidence(
+                question_pdf,
+                config.input.examiner_reports_dir,
+                span.question_number,
+                config,
+                report_paths=examiner_report_paths,
+            )
         examiner_text = examiner_evidence.classification_text if examiner_evidence else ""
         records.append(
             _build_question_record(
@@ -161,8 +170,8 @@ def build_records_for_pdf(
             )
         )
     _reconcile_paper_topics(records, config)
-    _write_pdf_diagnostic(question_pdf, layouts, spans, records, config)
-    _write_topic_debug_report(question_pdf, records, config)
+    if config.debug.enabled:
+        _write_pdf_diagnostic(question_pdf, layouts, spans, records, config)
     return records
 
 
@@ -229,9 +238,7 @@ def _build_question_record(
             structured_part_texts=structured_text.part_texts,
         )
         question_topic = _question_topic_from_parts(classification, part_level_topics)
-        qa_flags = _record_qa_flags(str(question_topic["paper_family"]), str(question_topic["topic"]), config, mark_scheme_image)
         flags.extend(question_topic["review_flags"])
-        flags.extend(qa_flags)
         flags.extend(render_result.review_flags)
         confidence = _record_confidence(float(question_topic["confidence"]), flags)
 
@@ -259,6 +266,7 @@ def _build_question_record(
                 component=document_metadata.component,
                 document_key=document_metadata.canonical_key,
                 metadata_source=document_metadata.source,
+                mark_scheme_source_pdf=_display_path(matched_mark_scheme) if matched_mark_scheme else "",
                 source_paper_family=classification.source_paper_family,
                 inferred_paper_family=classification.inferred_paper_family,
                 paper_family_confidence=classification.paper_family_confidence,
@@ -308,33 +316,7 @@ def _build_question_record(
                 markscheme_marks_total=mark_scheme_image.markscheme_marks_total if mark_scheme_image else None,
                 markscheme_mapping_status=mark_scheme_image.mapping_status if mark_scheme_image else "fail",
                 markscheme_failure_reason=mark_scheme_image.failure_reason if mark_scheme_image else "partial_question_block",
-                qa_status="fail" if any(flag.startswith("qa_fail_") for flag in qa_flags) else ("warning" if qa_flags else "pass"),
-                qa_flags=qa_flags,
             )
-
-
-def _record_qa_flags(
-    paper_family: str,
-    topic: str,
-    config: AppConfig,
-    mark_scheme_image: MarkSchemeImageResult | None,
-) -> list[str]:
-    flags: list[str] = []
-    allowed_topics = set(config.paper_family_taxonomy.get(paper_family, {}))
-    if paper_family in config.paper_family_taxonomy and topic not in allowed_topics:
-        flags.append("qa_fail_invalid_topic_for_paper")
-    if mark_scheme_image:
-        if mark_scheme_image.image_path and not mark_scheme_image.table_header_ok:
-            flags.append("qa_fail_markscheme_header_not_ok")
-        if mark_scheme_image.image_path and not mark_scheme_image.markscheme_question_number:
-            flags.append("qa_fail_markscheme_label_missing")
-        if "markscheme_continuation_maybe_truncated" in mark_scheme_image.review_flags:
-            flags.append("qa_warn_markscheme_continuation_maybe_truncated")
-        if "markscheme_parent_label_match" in mark_scheme_image.review_flags:
-            flags.append("qa_warn_markscheme_parent_label_match")
-        if mark_scheme_image.mapping_status == "fail":
-            flags.append(f"qa_fail_markscheme_{mark_scheme_image.failure_reason or 'mapping_failed'}")
-    return sorted(set(flags))
 
 
 _QUESTION_SUBPART_LABEL_RE = re.compile(
@@ -360,6 +342,17 @@ def _question_subparts_from_text(text: str) -> list[str]:
     if any(label in roman_labels for label in subparts):
         return sorted({label for label in subparts if label in roman_labels}, key=roman_labels.index)
     return subparts
+
+
+def _question_subparts_from_span(span: QuestionSpan) -> list[str]:
+    lines: list[str] = []
+    for block in span.blocks:
+        control_stripped = "".join(char if ord(char) >= 32 or char in "\n\t\r" else " " for char in block.text)
+        for raw_line in control_stripped.replace("\u00a0", " ").splitlines():
+            normalized_line = " ".join(raw_line.split())
+            if normalized_line:
+                lines.append(normalized_line)
+    return _question_subparts_from_text("\n".join(lines))
 
 
 def _record_confidence(classification_confidence: float, flags: list[str]) -> float:
@@ -910,7 +903,7 @@ def _write_pdf_diagnostic(
         "markscheme_image_missing_count": sum(1 for record in records if "markscheme_image_missing" in record.review_flags),
         "review_flag_counts": _flag_counts(records),
     }
-    path = config.output.review_dir / f"{paper_name}_diagnostics.json"
+    path = config.output.debug_dir / f"{paper_name}_diagnostics.json"
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return path
 
@@ -927,7 +920,7 @@ def _write_batch_diagnostic(records: list[QuestionRecord], config: AppConfig, ba
         "markscheme_image_missing_count": sum(1 for record in records if "markscheme_image_missing" in record.review_flags),
         "review_flag_counts": _flag_counts(records),
     }
-    path = config.output.review_dir / name
+    path = config.output.debug_dir / name
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return path
 
@@ -1043,7 +1036,7 @@ def _write_topic_debug_report(question_pdf: Path, records: list[QuestionRecord],
             for record in records
         ],
     }
-    path = config.output.review_dir / f"{paper_name}_topic_debug.json"
+    path = config.output.debug_dir / f"{paper_name}_topic_debug.json"
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return path
 

@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from exam_bank.config import AppConfig
-from exam_bank.exporters import write_csv, write_json
+from exam_bank.exporters import write_json
 from exam_bank.identifiers import normalize_question_id
 from exam_bank.image_rendering import _detect_prompt_regions
 from exam_bank.mark_schemes import (
@@ -22,7 +22,7 @@ from exam_bank.mark_schemes import (
     find_mark_scheme,
 )
 from exam_bank.models import BoundingBox, PageLayout, QuestionRecord, TextBlock
-from exam_bank.pipeline import _question_subparts_from_text
+from exam_bank.pipeline import _question_subparts_from_span, _question_subparts_from_text
 from exam_bank.question_detection import detect_question_spans, extract_marks_from_text, parse_question_start
 
 
@@ -248,6 +248,27 @@ def test_detect_question_spans_preserves_out_of_order_top_continuation_on_contin
 def test_extract_marks_sums_bracketed_marks() -> None:
     assert extract_marks_from_text("Find x. [2]\nHence find y. [3]") == 5
     assert extract_marks_from_text("No mark shown") is None
+
+
+def test_question_subparts_from_span_preserves_multiline_middle_parts() -> None:
+    span = detect_question_spans(
+        [
+            PageLayout(
+                page_number=1,
+                width=595,
+                height=842,
+                blocks=[
+                    block(1, "7 (a) First part. [2]\n(b) Second part. [3]\n(c) Third part. [1]", 100),
+                    block(1, "8 Next question. [4]", 260),
+                ],
+            )
+        ],
+        Path("paper_qp.pdf"),
+        AppConfig(),
+    )[0]
+
+    assert _question_subparts_from_text(span.combined_text) == ["a"]
+    assert _question_subparts_from_span(span) == ["a", "b", "c"]
 
 
 def test_mark_scheme_auto_pairing(tmp_path: Path) -> None:
@@ -1079,13 +1100,13 @@ def test_mark_scheme_word_anchor_detection_rejects_far_right_false_boundary_row(
     assert [(anchor.question_number, round(anchor.y0)) for anchor in anchors] == [("1", 80), ("2", 301)]
 
 
-def test_record_json_schema_contains_required_fields(tmp_path: Path) -> None:
+def test_record_json_schema_matches_paper_first_output_contract(tmp_path: Path) -> None:
     record = QuestionRecord(
         source_pdf="paper.pdf",
         paper_name="paper",
         question_number="1",
         full_question_label="1(a)-(b)",
-        screenshot_path="output/images/paper_q01.png",
+        screenshot_path="output/p1/12spring21/questions/q01.png",
         combined_question_text="Find x.",
         body_text_raw="Find x.",
         body_text_normalized="Find x.",
@@ -1114,128 +1135,43 @@ def test_record_json_schema_contains_required_fields(tmp_path: Path) -> None:
         page_numbers=[1],
         review_flags=[],
         confidence=0.8,
+        session="March",
+        year="2021",
+        component="12",
+        source_paper_code="12",
+        markscheme_image="output/p1/12spring21/mark_scheme/q01.png",
+        markscheme_pages=[5],
+        markscheme_marks_total=3,
+        question_marks_total=3,
+        question_subparts=["a", "b"],
+        mark_scheme_source_pdf="paper_ms.pdf",
     )
-    output = write_json([record], tmp_path / "records.json")
+    output = write_json([record], tmp_path / "records.json", output_root="output")
     data = output.read_text(encoding="utf-8")
 
     for key in [
-        "source_pdf",
-        "paper_name",
-        "question_number",
-        "full_question_label",
-        "question_image",
-        "question_pages",
-        "question_crop_confidence",
-        "screenshot_path",
-        "combined_question_text",
-        "body_text_raw",
-        "body_text_normalized",
-        "math_lines",
-        "diagram_text",
-        "extraction_quality_score",
-        "extraction_quality_flags",
-        "part_texts",
-        "answer_text",
+        "question_id",
+        "paper",
         "paper_family",
-        "source_paper_code",
-        "source_paper_family",
-        "inferred_paper_family",
-        "paper_family_confidence",
-        "question_level_paper_family",
-        "question_level_topic",
-        "question_level_subtopic",
-        "part_level_topics",
+        "question_number",
+        "question_text",
+        "mark_scheme_text",
+        "question_solution_marks",
+        "subparts",
+        "subparts_solution_marks",
+        "question_image_paths",
+        "mark_scheme_image_paths",
+        "page_refs",
         "topic",
-        "subtopic",
-        "topic_confidence",
-        "topic_confidence_score",
-        "topic_evidence",
-        "topic_evidence_details",
-        "secondary_topics",
-        "topic_uncertain",
-        "topic_alternatives",
-        "difficulty",
-        "difficulty_confidence",
-        "difficulty_evidence",
-        "difficulty_uncertain",
-        "marks",
-        "marks_if_available",
-        "page_numbers",
-        "review_flags",
-        "confidence",
-        "markscheme_text",
-        "markscheme_image",
-        "markscheme_pages",
-        "markscheme_question_number",
-        "markscheme_crop_confidence",
-        "markscheme_mapping_method",
-        "markscheme_table_detected",
-        "markscheme_table_header_detected",
-        "markscheme_nearby_anchors",
-        "markscheme_debug_paths",
-        "markscheme_table_header_ok",
-        "mark_scheme",
-        "qa",
+        "notes",
     ]:
         assert f'"{key}"' in data
 
-
-def test_csv_is_image_first_and_omits_question_text(tmp_path: Path) -> None:
-    record = QuestionRecord(
-        source_pdf="paper.pdf",
-        paper_name="paper",
-        question_number="1",
-        full_question_label="1(a)-(b)",
-        screenshot_path="output/images/paper_q01.png",
-        combined_question_text="This should stay out of the CSV.",
-        body_text_raw="This should stay out of the CSV.",
-        body_text_normalized="This should stay out of the CSV.",
-        math_lines=[],
-        diagram_text=[],
-        extraction_quality_score=0.95,
-        extraction_quality_flags=[],
-        part_texts=[],
-        answer_text="x = 2",
-        paper_family="P1",
-        source_paper_family="P1",
-        inferred_paper_family="P1",
-        paper_family_confidence="high",
-        topic="quadratics",
-        subtopic="solving",
-        topic_confidence="medium",
-        topic_evidence="test fixture",
-        secondary_topics=[],
-        topic_uncertain=False,
-        difficulty="easy",
-        difficulty_confidence="high",
-        difficulty_evidence="direct routine method",
-        difficulty_uncertain=False,
-        marks=3,
-        marks_if_available=3,
-        page_numbers=[1],
-        review_flags=[],
-        confidence=0.8,
-    )
-
-    output = write_csv([record], tmp_path / "records.csv")
-    data = output.read_text(encoding="utf-8")
-
-    assert "question_image" in data
-    assert "question_image_link" in data
-    assert "paper_family" in data
-    assert "source_paper_code" in data
-    assert "source_paper_family" in data
-    assert "question_pages" in data
-    assert "question_crop_confidence" in data
-    assert "difficulty_confidence" in data
-    assert "markscheme_image" in data
-    assert "markscheme_table_header_detected" in data
-    assert "question_level_paper_family" in data
-    assert "question_level_topic" in data
-    assert "part_level_topics" in data
-    assert "output/images/paper_q01.png" in data
-    assert "combined_question_text" not in data
-    assert "This should stay out of the CSV." not in data
+    assert '"paper": "12spring21"' in data
+    assert '"question_id": "12spring21_q01"' in data
+    assert '"question_image_paths": [' in data
+    assert '"p1/12spring21/questions/q01.png"' in data
+    assert '"p1/12spring21/mark_scheme/q01.png"' in data
 
 
 def test_prompt_crop_regions_split_large_answer_space_and_skip_next_question() -> None:

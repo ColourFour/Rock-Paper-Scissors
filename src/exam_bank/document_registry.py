@@ -44,11 +44,17 @@ class DocumentRegistry:
         )
 
 
-def build_document_registry(folder: str | Path) -> DocumentRegistry:
-    return build_document_registry_from_paths([folder])
+def build_document_registry(
+    folder: str | Path,
+    allowed_document_types: set[str] | None = None,
+) -> DocumentRegistry:
+    return build_document_registry_from_paths([folder], allowed_document_types=allowed_document_types)
 
 
-def build_document_registry_from_paths(paths: list[str | Path]) -> DocumentRegistry:
+def build_document_registry_from_paths(
+    paths: list[str | Path],
+    allowed_document_types: set[str] | None = None,
+) -> DocumentRegistry:
     registry = DocumentRegistry()
     pdfs = _scan_pdf_paths(paths)
     session_metadata: dict[str, DocumentMetadata] = {}
@@ -57,6 +63,8 @@ def build_document_registry_from_paths(paths: list[str | Path]) -> DocumentRegis
         metadata = parse_filename_metadata(path)
         if not metadata.document_type:
             registry.unclassified.append(path)
+            continue
+        if allowed_document_types is not None and metadata.document_type not in allowed_document_types:
             continue
 
         if metadata.document_type == "examiner_report" and not metadata.component:

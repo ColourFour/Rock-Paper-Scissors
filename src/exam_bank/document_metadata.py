@@ -5,54 +5,7 @@ from pathlib import Path
 import re
 
 from .models import PageLayout
-
-
-SESSION_ALIASES = {
-    "m": "March",
-    "march": "March",
-    "mar": "March",
-    "s": "MayJune",
-    "summer": "MayJune",
-    "may": "MayJune",
-    "june": "MayJune",
-    "mayjune": "MayJune",
-    "may_june": "MayJune",
-    "mj": "MayJune",
-    "w": "OctNov",
-    "winter": "OctNov",
-    "oct": "OctNov",
-    "october": "October",
-    "nov": "November",
-    "november": "November",
-    "octnov": "OctNov",
-    "oct_nov": "OctNov",
-    "october_november": "OctNov",
-    "on": "OctNov",
-}
-
-DOCUMENT_TYPE_ALIASES = {
-    "qp": "question_paper",
-    "questionpaper": "question_paper",
-    "question_paper": "question_paper",
-    "question": "question_paper",
-    "ms": "mark_scheme",
-    "markscheme": "mark_scheme",
-    "mark_scheme": "mark_scheme",
-    "scheme": "mark_scheme",
-    "er": "examiner_report",
-    "examinerreport": "examiner_report",
-    "examiner_report": "examiner_report",
-    "report": "examiner_report",
-}
-
-COMPACT_DOCUMENT_TYPES = {
-    "question_paper": "QP",
-    "mark_scheme": "MS",
-    "examiner_report": "ER",
-    "QP": "QP",
-    "MS": "MS",
-    "ER": "ER",
-}
+from .runtime_profile import COMPACT_DOCUMENT_TYPES, DOCUMENT_TYPE_ALIASES, SESSION_ALIASES
 
 
 @dataclass(frozen=True)

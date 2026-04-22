@@ -135,8 +135,7 @@ def test_process_registry_routes_only_question_papers_to_question_extraction(tmp
         return []
 
     monkeypatch.setattr(pipeline, "build_records_for_pdf", fake_build_records_for_pdf)
-    monkeypatch.setattr(pipeline, "export_records", lambda records, config: (tmp_path / "question_bank.json", tmp_path / "question_bank.csv"))
-    monkeypatch.setattr(pipeline, "write_review_file", lambda records, config: tmp_path / "review.csv")
+    monkeypatch.setattr(pipeline, "export_records", lambda records, config: tmp_path / "question_bank.json")
     monkeypatch.setattr(pipeline, "_write_batch_diagnostic", lambda records, config: tmp_path / "diagnostics.json")
 
     pipeline._process_registry_entries(registry, config)

@@ -4,81 +4,21 @@ from dataclasses import dataclass, field, is_dataclass
 from pathlib import Path
 from typing import Any
 
-
-PAPER_FAMILIES = ["P1", "P2", "P3", "P4", "P5", "P6", "unknown"]
-
-DEFAULT_PAPER_FAMILY_TAXONOMY = {
-    "P1": {
-        "algebra": ["general"],
-        "quadratics": ["general"],
-        "functions": ["general"],
-        "coordinate_geometry": ["general"],
-        "circular_measure": ["general"],
-        "trigonometry": ["general"],
-        "series_and_sequences": ["general"],
-        "binomial_expansion": ["general"],
-        "differentiation": ["general"],
-        "integration": ["general"],
-    },
-    "P2": {
-        "logarithmic_and_exponential_functions": ["general"],
-        "trigonometry": ["general"],
-        "differentiation": ["general"],
-        "integration": ["general"],
-    },
-    "P3": {
-        "algebra": ["general"],
-        "modulus": ["general"],
-        "logarithms_and_exponentials": ["general"],
-        "functions": ["general"],
-        "numerical_methods": ["general"],
-        "trigonometry": ["general"],
-        "integration": ["general"],
-        "differentiation": ["general"],
-        "differential_equations": ["general"],
-        "binomial_expansion": ["general"],
-        "implicit_differentiation": ["general"],
-        "partial_fractions": ["general"],
-        "vectors": ["general"],
-        "complex_numbers": ["general"],
-        "polynomials": ["general"],
-        "parametric_equations": ["general"],
-    },
-    "P4": {
-        "kinematics_constant_acceleration": ["general"],
-        "kinematics_graphs": ["general"],
-        "kinematics_variable_functions": ["general"],
-        "forces_newtons_second_law": ["general"],
-        "equilibrium_coplanar_forces": ["general"],
-        "equilibrium_particle": ["general"],
-        "friction_rough_plane": ["general"],
-        "connected_particles": ["general"],
-        "momentum_impulse": ["general"],
-        "work_energy_power": ["general"],
-        "connected_particles_energy": ["general"],
-        "rough_plane_energy": ["general"],
-        "power_and_resistance": ["general"],
-    },
-    "P5": {
-        "data_representation": ["general"],
-        "measures_of_central_tendency_and_dispersion": ["general"],
-        "permutations_and_combinations": ["general"],
-        "probability": ["general"],
-        "probability_distributions": ["general"],
-        "geometric_distribution": ["general"],
-        "binomial_distribution": ["general"],
-        "normal_distribution": ["general"],
-    },
-    "P6": {
-        "probability": ["general"],
-        "continuous_random_variables": ["general"],
-        "normal_distribution": ["general"],
-        "central_limit_theorem": ["general"],
-        "confidence_intervals": ["general"],
-        "hypothesis_testing": ["general"],
-    },
-    "unknown": {},
-}
+from .runtime_profile import (
+    ACTIVE_INPUT_DOCUMENT_TYPES,
+    ACTIVE_OUTPUTS,
+    ARCHIVED_INPUT_DOCUMENT_TYPES,
+    ARCHIVED_RUNTIME_SURFACES,
+    CLASSIFICATION_HINT_OVERRIDES,
+    DIFFICULTY_HEURISTICS,
+    DIFFICULTY_LABELS,
+    OUTPUT_LAYOUT,
+    PAPER_FAMILIES,
+    PAPER_FAMILY_TAXONOMY,
+    RUNTIME_PROFILE_PATH,
+    RUNTIME_TAXONOMY,
+    TOPIC_MODE,
+)
 
 
 def _phrase(label: str) -> str:
@@ -130,719 +70,45 @@ def _deep_merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[st
     return merged
 
 
-CAIE_9709_HINTS = {
-    "paper_family_aliases": {
-        "1": "P1",
-        "3": "P3",
-        "4": "P4",
-        "5": "P5",
-        "paper 1": "P1",
-        "paper 3": "P3",
-        "paper 4": "P4",
-        "paper 5": "P5",
-        "pure mathematics 1": "P1",
-        "pure mathematics 3": "P3",
-        "mechanics": "P4",
-        "probability & statistics 1": "P5",
-        "probability and statistics 1": "P5",
-        "m1": "P4",
-        "s1": "P5",
-    },
-
-    "P1": {
-        "quadratics": {
-            "subtopics": {
-                "solving": {
-                    "methods": ["solve", "find the roots", "factorise", "complete the square"],
-                    "keywords": ["quadratic", "root", "roots", "discriminant", "equal roots", "real roots"],
-                    "anti_keywords": ["log", "ln", "vector", "complex", "probability"],
-                },
-                "discriminant": {
-                    "methods": ["show", "determine", "find"],
-                    "keywords": ["discriminant", "equal roots", "real and distinct", "no real roots"],
-                },
-            },
-        },
-        "polynomials": {
-            "subtopics": {
-                "remainder_factor_theorem": {
-                    "methods": ["find", "show", "determine", "factorise"],
-                    "keywords": ["remainder", "factor theorem", "when f(x) is divided by", "is a factor of"],
-                },
-                "division": {
-                    "methods": ["divide", "express"],
-                    "keywords": ["quotient", "remainder", "divided by"],
-                },
-            },
-        },
-        "partial_fractions": {
-            "subtopics": {
-                "decomposition": {
-                    "methods": ["express in partial fractions", "decompose"],
-                    "keywords": ["partial fractions", "rational function"],
-                },
-            },
-        },
-        "modulus": {
-            "subtopics": {
-                "equations": {
-                    "methods": ["solve"],
-                    "keywords": ["|x|", "modulus", "absolute value"],
-                },
-                "graphs": {
-                    "methods": ["sketch", "draw"],
-                    "keywords": ["|x|", "modulus", "graph"],
-                },
-            },
-        },
-        "inequalities": {
-            "subtopics": {
-                "algebraic": {
-                    "methods": ["solve"],
-                    "keywords": ["inequality", "<", ">", "≤", "≥"],
-                    "anti_keywords": ["probability", "hypothesis"],
-                },
-            },
-        },
-        "functions": {
-            "subtopics": {
-                "composite": {
-                    "methods": ["find", "show"],
-                    "keywords": ["f(g(x))", "g(f(x))", "fg", "gf", "composite"],
-                },
-                "inverse": {
-                    "methods": ["find", "show"],
-                    "keywords": ["inverse", "f^-1", "f^{-1}"],
-                },
-                "transformations": {
-                    "methods": ["sketch", "describe", "write down"],
-                    "keywords": ["translation", "stretch", "reflection", "transformation"],
-                },
-                "domain_range": {
-                    "methods": ["state", "find"],
-                    "keywords": ["domain", "range", "one-one"],
-                },
-            },
-        },
-        "coordinate_geometry": {
-            "subtopics": {
-                "straight_line": {
-                    "methods": ["find the equation", "show that"],
-                    "keywords": ["gradient", "parallel", "perpendicular", "midpoint"],
-                },
-            },
-        },
-        "circular_measure": {
-            "subtopics": {
-                "radians": {
-                    "methods": ["find", "calculate"],
-                    "keywords": ["radian", "θ", "theta"],
-                },
-                "arc_sector": {
-                    "methods": ["find", "calculate"],
-                    "keywords": ["arc length", "sector area", "sector"],
-                },
-            },
-        },
-        "trigonometry": {
-            "subtopics": {
-                "equations": {
-                    "methods": ["solve"],
-                    "keywords": ["sin", "cos", "tan"],
-                },
-                "identities": {
-                    "methods": ["show that", "prove that"],
-                    "keywords": ["identity", "sin", "cos", "tan"],
-                },
-                "graphs": {
-                    "methods": ["sketch", "draw"],
-                    "keywords": ["amplitude", "period", "trigonometric graph", "sin", "cos", "tan"],
-                },
-            },
-        },
-        "binomial_expansion": {
-            "subtopics": {
-                "positive_integer": {
-                    "methods": ["expand"],
-                    "keywords": ["binomial", "positive integer power"],
-                },
-                "fractional_negative": {
-                    "methods": ["expand", "approximate"],
-                    "keywords": ["ascending powers", "valid for", "fractional power", "negative power"],
-                },
-            },
-        },
-        "differentiation": {
-            "subtopics": {
-                "standard": {
-                    "methods": ["differentiate", "find dy/dx"],
-                    "keywords": ["dy/dx", "derivative"],
-                },
-                "tangents_normals": {
-                    "methods": ["find the equation"],
-                    "keywords": ["tangent", "normal", "gradient"],
-                },
-                "stationary_points": {
-                    "methods": ["find", "determine"],
-                    "keywords": ["stationary point", "maximum", "minimum"],
-                },
-            },
-        },
-        "integration": {
-            "subtopics": {
-                "standard": {
-                    "methods": ["integrate"],
-                    "keywords": ["integral", "constant of integration"],
-                },
-                "definite": {
-                    "methods": ["evaluate", "integrate"],
-                    "keywords": ["limits", "definite integral"],
-                },
-                "area_under_curve": {
-                    "methods": ["find the area", "calculate the area"],
-                    "keywords": ["area under the curve", "bounded by the curve"],
-                },
-            },
-        },
-        "numerical_methods": {
-            "subtopics": {
-                "change_of_sign": {
-                    "methods": ["show", "verify"],
-                    "keywords": ["root between", "change of sign"],
-                },
-                "iteration": {
-                    "methods": ["use the iterative formula", "iterate"],
-                    "keywords": ["x_(n+1)", "x_{n+1}", "recurrence relation"],
-                },
-            },
-        },
-    },
-
-    "P2": {
-        # Legacy / route-specific pure paper. Keep narrower than P3.
-        "logarithmic_and_exponential_functions": {
-            "subtopics": {
-                "log_laws": {
-                    "methods": ["simplify", "show that"],
-                    "keywords": ["log", "ln"],
-                },
-                "equations": {
-                    "methods": ["solve"],
-                    "keywords": ["log", "ln", "e^", "exponential"],
-                },
-            },
-        },
-        "trigonometry": {
-            "subtopics": {
-                "equations": {"methods": ["solve"], "keywords": ["sin", "cos", "tan"]},
-                "identities": {"methods": ["show that", "prove that"], "keywords": ["identity", "sec", "cosec", "cot"]},
-            },
-        },
-        "differentiation": {
-            "subtopics": {
-                "stationary_points": {"methods": ["find"], "keywords": ["stationary point", "maximum", "minimum"]},
-            },
-        },
-        "integration": {
-            "subtopics": {
-                "standard": {"methods": ["integrate"], "keywords": ["integral"]},
-                "area_under_curve": {"methods": ["find the area"], "keywords": ["area under the curve"]},
-            },
-        },
-    },
-
-    "P3": {
-        "logarithmic_and_exponential_functions": {
-            "subtopics": {
-                "log_laws": {"methods": ["simplify", "show that"], "keywords": ["log", "ln"]},
-                "equations": {"methods": ["solve"], "keywords": ["log", "ln", "e^", "exponential"]},
-            },
-        },
-        "trigonometry": {
-            "subtopics": {
-                "equations": {"methods": ["solve"], "keywords": ["sin", "cos", "tan", "sec", "cosec", "cot"]},
-                "identities": {"methods": ["show that", "prove that"], "keywords": ["identity", "sec", "cosec", "cot"]},
-            },
-        },
-        "integration": {
-            "subtopics": {
-                "by_parts": {
-                    "methods": ["integrate", "use integration by parts"],
-                    "keywords": ["by parts", "x e^", "x sin", "x cos", "x sec^2", "ln x"],
-                },
-                "by_substitution": {
-                    "methods": ["integrate", "use the substitution"],
-                    "keywords": ["substitution", "u =", "hence integrate"],
-                },
-                "partial_fractions": {
-                    "methods": ["integrate"],
-                    "keywords": ["partial fractions", "rational function"],
-                },
-                "recurrence": {
-                    "methods": ["show that", "prove that"],
-                    "keywords": ["I_n", "I_{n+1}", "reduction formula", "recurrence relation"],
-                },
-            },
-        },
-        "differentiation": {
-            "subtopics": {
-                "implicit": {
-                    "methods": ["differentiate", "find dy/dx"],
-                    "keywords": ["implicitly", "dy/dx"],
-                },
-                "parametric": {
-                    "methods": ["find dy/dx", "find the equation of the tangent"],
-                    "keywords": ["x =", "y =", "parameter", "dx/dt", "dy/dt"],
-                },
-            },
-        },
-        "parametric_equations": {
-            "subtopics": {
-                "area_or_length_style": {
-                    "methods": ["find the area", "find the coordinates", "find the tangent"],
-                    "keywords": ["parameter", "dx/dt", "dy/dt", "parametric"],
-                },
-            },
-        },
-        "differential_equations": {
-            "subtopics": {
-                "separable": {
-                    "methods": ["solve", "separate variables"],
-                    "keywords": ["dy/dx", "given that", "when x =", "when y ="],
-                },
-                "modelling": {
-                    "methods": ["form", "solve"],
-                    "keywords": ["rate of change", "differential equation"],
-                },
-            },
-        },
-        "vectors": {
-            "subtopics": {
-                "geometry": {
-                    "methods": ["show that", "find", "determine"],
-                    "keywords": ["position vector", "parallel", "perpendicular", "midpoint", "ratio"],
-                },
-                "vector_equations": {
-                    "methods": ["find", "show that"],
-                    "keywords": ["r =", "vector equation", "line", "scalar product"],
-                },
-            },
-        },
-        "complex_numbers": {
-            "subtopics": {
-                "argand": {
-                    "methods": ["represent", "sketch"],
-                    "keywords": ["argand", "complex plane"],
-                },
-                "modulus_argument": {
-                    "methods": ["find", "calculate"],
-                    "keywords": ["|z|", "arg z", "argument", "modulus"],
-                },
-                "roots": {
-                    "methods": ["solve", "find the roots"],
-                    "keywords": ["complex roots", "root of the equation", "z"],
-                },
-                "loci": {
-                    "methods": ["describe", "sketch"],
-                    "keywords": ["locus", "|z-a|", "arg"],
-                },
-            },
-        },
-        "series": {
-            "subtopics": {
-                "binomial_fractional_negative": {
-                    "methods": ["expand", "approximate"],
-                    "keywords": ["ascending powers", "valid for", "fractional power", "negative power"],
-                },
-                "maclaurin": {
-                    "methods": ["expand", "obtain the first terms"],
-                    "keywords": ["maclaurin", "series in ascending powers of x"],
-                },
-            },
-        },
-    },
-
-    "P4": {
-        "kinematics": {
-            "subtopics": {
-                "constant_acceleration": {
-                    "methods": ["find", "calculate"],
-                    "keywords": ["u", "v", "a", "s", "t", "constant acceleration"],
-                },
-                "variable_acceleration": {
-                    "methods": ["differentiate", "integrate", "find"],
-                    "keywords": ["displacement", "velocity", "acceleration", "particle"],
-                },
-            },
-        },
-        "forces_and_equilibrium": {
-            "subtopics": {
-                "resolving_forces": {
-                    "methods": ["resolve", "find"],
-                    "keywords": ["component", "inclined plane", "equilibrium"],
-                },
-                "friction": {
-                    "methods": ["find", "calculate"],
-                    "keywords": ["friction", "coefficient of friction", "limiting equilibrium", "about to move"],
-                },
-            },
-        },
-        "connected_particles": {
-            "subtopics": {
-                "tension_systems": {
-                    "methods": ["find", "calculate"],
-                    "keywords": ["connected particles", "string", "tension", "pulley"],
-                },
-            },
-        },
-        "momentum_and_impulse": {
-            "subtopics": {
-                "impulse": {
-                    "methods": ["find", "calculate"],
-                    "keywords": ["impulse", "momentum"],
-                },
-                "collisions": {
-                    "methods": ["find", "calculate"],
-                    "keywords": ["collision", "coefficient of restitution", "impact"],
-                },
-            },
-        },
-        "work_energy_power": {
-            "subtopics": {
-                "work_energy": {
-                    "methods": ["find", "calculate", "use conservation of energy"],
-                    "keywords": ["work", "kinetic energy", "potential energy", "loss in gravitational potential energy"],
-                },
-                "power": {
-                    "methods": ["find", "calculate"],
-                    "keywords": ["power", "rate of working"],
-                },
-            },
-        },
-        "circular_motion": {
-            "subtopics": {
-                "centripetal_force": {
-                    "methods": ["find", "calculate"],
-                    "keywords": ["circular motion", "centripetal", "speed at the lowest point", "tension"],
-                },
-            },
-        },
-    },
-
-    "P5": {
-        "permutations_and_combinations": {
-            "subtopics": {
-                "arrangements": {
-                    "methods": ["find", "calculate"],
-                    "keywords": ["arrangements", "different ways", "letters", "digits"],
-                },
-                "selections": {
-                    "methods": ["find", "calculate"],
-                    "keywords": ["committee", "choose", "selection"],
-                },
-            },
-        },
-        "probability": {
-            "subtopics": {
-                "basic": {"methods": ["find", "calculate"], "keywords": ["P(", "probability"]},
-                "conditional": {"methods": ["find", "calculate"], "keywords": ["given that", "conditional probability"]},
-                "tree_diagrams": {"methods": ["draw", "use"], "keywords": ["tree diagram", "branch"]},
-            },
-        },
-        "discrete_random_variables": {
-            "subtopics": {
-                "expectation_variance": {
-                    "methods": ["find", "calculate"],
-                    "keywords": ["E(X)", "Var(X)", "random variable"],
-                },
-            },
-        },
-        "binomial_distribution": {
-            "subtopics": {
-                "direct": {"methods": ["find", "calculate"], "keywords": ["X ~ B", "Bin", "binomial distribution"]},
-                "cumulative": {"methods": ["find", "calculate"], "keywords": ["at least", "at most", "more than", "fewer than"]},
-            },
-        },
-        "poisson_distribution": {
-            "subtopics": {
-                "direct": {"methods": ["find", "calculate"], "keywords": ["Poisson", "X ~ Po", "mean rate"]},
-            },
-        },
-        "normal_distribution": {
-            "subtopics": {
-                "standardisation": {
-                    "methods": ["find", "calculate"],
-                    "keywords": ["normal distribution", "standard deviation", "standardise", "z-value"],
-                },
-                "inverse": {
-                    "methods": ["find"],
-                    "keywords": ["percentage point", "find the value of k", "upper tail", "lower tail"],
-                },
-            },
-        },
-        "correlation_and_regression": {
-            "subtopics": {
-                "pmcc": {
-                    "methods": ["calculate", "find"],
-                    "keywords": ["product moment correlation coefficient", "PMCC"],
-                },
-                "regression": {
-                    "methods": ["find", "estimate"],
-                    "keywords": ["least squares regression line", "regression line of y on x"],
-                },
-                "interpretation": {
-                    "methods": ["comment", "interpret"],
-                    "keywords": ["correlation", "regression", "outlier"],
-                },
-            },
-        },
+def _copied_paper_family_taxonomy() -> dict[str, dict[str, list[str]]]:
+    return {
+        family: {topic: list(subtopics) for topic, subtopics in topics.items()}
+        for family, topics in PAPER_FAMILY_TAXONOMY.items()
     }
-}
 
-# Active classifier hints use the same family -> topic -> subtopic shape as
-# DEFAULT_PAPER_FAMILY_TAXONOMY. CAIE_9709_HINTS above is kept as a broader
-# note bank, but this is the structure consumed by classification.py.
-CAIE_CLASSIFICATION_HINTS = {
-    "P1": {
-        "algebra": {
-            "general": {"methods": ["simplify", "solve", "factorise", "express"], "objects": ["algebraic expression", "equation"], "keywords": ["surd", "rearrange", "substitute"]},
-        },
-        "quadratics": {
-            "general": {"methods": ["solve", "find", "show"], "objects": ["quadratic", "quadratic equation", "discriminant"], "keywords": ["roots", "equal roots", "real roots", "intersection"]},
-        },
-        "functions": {
-            "general": {"methods": ["find", "show", "state", "describe", "sketch"], "objects": ["function", "composite function", "inverse function", "domain", "range", "transformation"], "keywords": ["f(g", "g(f", "inverse", "domain", "range", "translation", "stretch", "reflection"]},
-        },
-        "coordinate_geometry": {
-            "general": {"methods": ["find the equation", "show", "find"], "objects": ["straight line", "circle", "gradient", "centre", "radius"], "keywords": ["perpendicular", "parallel", "intersection", "diameter", "midpoint"]},
-        },
-        "circular_measure": {
-            "general": {"methods": ["find", "calculate"], "objects": ["radian", "arc", "sector", "segment"], "keywords": ["theta", "arc length", "sector area"]},
-        },
-        "trigonometry": {
-            "general": {"methods": ["solve", "prove", "show", "sketch"], "objects": ["trigonometric equation", "identity", "trig graph"], "keywords": ["sin", "cos", "tan", "period", "amplitude"]},
-        },
-        "series_and_sequences": {
-            "general": {"methods": ["find", "calculate", "show"], "objects": ["sequence", "series", "arithmetic progression", "geometric progression"], "keywords": ["AP", "GP", "sum to infinity", "common difference", "common ratio"]},
-        },
-        "binomial_expansion": {
-            "general": {"methods": ["expand", "approximate", "find"], "objects": ["binomial", "binomial expansion", "coefficient"], "keywords": ["ascending powers", "valid for", "coefficient", "term independent of x"]},
-        },
-        "differentiation": {
-            "general": {"methods": ["differentiate", "find dy/dx", "find the equation"], "objects": ["derivative", "gradient", "stationary point", "tangent", "normal"], "keywords": ["dy/dx", "maximum", "minimum"]},
-        },
-        "integration": {
-            "general": {"methods": ["integrate", "evaluate", "find the area", "calculate the area"], "objects": ["integral", "definite integral", "curve", "volume"], "keywords": ["constant of integration", "limits", "area under", "volume of revolution"]},
-        },
-    },
-    "P2": {
-        "logarithmic_and_exponential_functions": {
-            "log_laws": {"methods": ["simplify", "show"], "objects": ["logarithm"], "keywords": ["log", "ln"]},
-            "exponential_equations": {"methods": ["solve"], "objects": ["exponential equation"], "keywords": ["e^", "exp"]},
-            "logarithmic_equations": {"methods": ["solve"], "objects": ["logarithmic equation"], "keywords": ["log", "ln"]},
-        },
-        "trigonometry": {
-            "trig_equations": {"methods": ["solve"], "objects": ["trigonometric equation"], "keywords": ["sin", "cos", "tan"]},
-            "trig_identities": {"methods": ["prove", "show"], "objects": ["identity"], "keywords": ["sin", "cos", "tan"]},
-        },
-        "differentiation": {
-            "standard_differentiation": {"methods": ["differentiate", "find dy/dx"], "objects": ["derivative"], "keywords": ["gradient"]},
-            "stationary_points": {"methods": ["find"], "objects": ["stationary point"], "keywords": ["maximum", "minimum"]},
-        },
-        "integration": {
-            "standard_integration": {"methods": ["integrate"], "objects": ["integral"], "keywords": []},
-            "area_under_curve": {"methods": ["find the area"], "objects": ["curve"], "keywords": ["area under"]},
-        },
-    },
-    "P3": {
-        "algebra": {
-            "general": {"methods": ["simplify", "solve", "express"], "objects": ["equation", "expression"], "keywords": ["algebraic", "substitute", "rearrange"]},
-        },
-        "modulus": {
-            "general": {"methods": ["solve", "sketch"], "objects": ["modulus", "absolute value"], "keywords": ["|x|", "|z|"]},
-        },
-        "logarithms_and_exponentials": {
-            "general": {"methods": ["solve", "show", "simplify"], "objects": ["logarithm", "exponential equation"], "keywords": ["log", "ln", "e^", "exponential"]},
-        },
-        "trigonometry": {
-            "general": {"methods": ["solve", "show", "prove"], "objects": ["trigonometric equation", "identity"], "keywords": ["sin", "cos", "tan", "sec", "cosec", "cot"]},
-        },
-        "functions": {
-            "general": {"methods": ["find", "show", "state", "sketch"], "objects": ["function", "composite function", "inverse function", "domain", "range"], "keywords": ["composite", "inverse", "domain", "range"]},
-        },
-        "numerical_methods": {
-            "general": {"methods": ["iterate", "estimate"], "objects": ["iterative formula", "root"], "keywords": ["x_n", "x_{n+1}", "newton", "change of sign", "fixed point"]},
-        },
-        "differentiation": {
-            "general": {"methods": ["differentiate", "find the equation"], "objects": ["derivative", "stationary point", "tangent", "normal"], "keywords": ["dy/dx", "maximum", "minimum"]},
-        },
-        "differential_equations": {
-            "general": {"methods": ["solve", "separate variables", "form"], "objects": ["differential equation"], "keywords": ["dy/dx", "rate of change"]},
-        },
-        "integration": {
-            "general": {"methods": ["integrate", "evaluate", "find the area"], "objects": ["integral", "definite integral"], "keywords": ["by parts", "substitution", "limits", "area"]},
-        },
-        "binomial_expansion": {
-            "general": {"methods": ["expand", "approximate"], "objects": ["binomial", "coefficient"], "keywords": ["ascending powers", "valid for", "coefficient"]},
-        },
-        "parametric_equations": {
-            "general": {"methods": ["find dy/dx", "differentiate", "integrate"], "objects": ["parametric"], "keywords": ["x =", "y =", "dx/dt", "dy/dt", "parameter"]},
-        },
-        "implicit_differentiation": {
-            "general": {"methods": ["differentiate", "find dy/dx"], "objects": ["implicit relation"], "keywords": ["implicitly", "implicit"]},
-        },
-        "partial_fractions": {
-            "general": {"methods": ["partial fractions", "express"], "objects": ["rational function"], "keywords": ["denominator", "numerator"]},
-        },
-        "vectors": {
-            "general": {"methods": ["prove", "show", "find"], "objects": ["vector", "position vector", "vector equation"], "keywords": ["parallel", "perpendicular", "scalar product"]},
-        },
-        "complex_numbers": {
-            "general": {"methods": ["sketch", "represent", "find", "solve"], "objects": ["complex number", "argand diagram", "modulus", "argument"], "keywords": ["argand", "|z|", "arg z", "complex roots", "locus"]},
-        },
-        "polynomials": {
-            "general": {"methods": ["find", "show", "factorise"], "objects": ["polynomial"], "keywords": ["factor theorem", "remainder theorem", "remainder", "quotient"]},
-        },
-    },
-    "P4": {
-        "kinematics_constant_acceleration": {
-            "general": {"methods": ["find", "calculate"], "objects": ["constant acceleration"], "keywords": ["u", "v", "a", "s", "t", "suvat"]},
-        },
-        "kinematics_graphs": {
-            "general": {"methods": ["find", "calculate", "sketch"], "objects": ["velocity-time graph", "speed-time graph", "displacement-time graph"], "keywords": ["area under", "gradient"]},
-        },
-        "kinematics_variable_functions": {
-            "general": {"methods": ["differentiate", "integrate", "find"], "objects": ["velocity", "acceleration", "displacement"], "keywords": ["v(t)", "a(t)", "s(t)", "particle moves so that"]},
-        },
-        "forces_newtons_second_law": {
-            "general": {"methods": ["resolve", "find", "calculate"], "objects": ["force", "newton's second law"], "keywords": ["ma", "particle", "acceleration"]},
-        },
-        "equilibrium_coplanar_forces": {
-            "general": {"methods": ["resolve", "find", "calculate"], "objects": ["coplanar forces", "equilibrium"], "keywords": ["three forces", "angles", "resultant"]},
-        },
-        "equilibrium_particle": {
-            "general": {"methods": ["resolve", "find", "calculate"], "objects": ["particle in equilibrium"], "keywords": ["equilibrium", "particle"]},
-        },
-        "friction_rough_plane": {
-            "general": {"methods": ["find", "calculate", "resolve"], "objects": ["rough plane", "friction"], "keywords": ["coefficient of friction", "limiting equilibrium", "about to move", "rough plane"]},
-        },
-        "connected_particles": {
-            "general": {"methods": ["find", "calculate"], "objects": ["connected particles", "string", "pulley", "tension"], "keywords": ["tension", "pulley"]},
-        },
-        "work_energy_power": {
-            "general": {"methods": ["find", "calculate", "use conservation of energy"], "objects": ["work", "kinetic energy", "potential energy", "power"], "keywords": ["energy", "work done", "loss of gravitational potential energy"]},
-        },
-        "momentum_impulse": {
-            "general": {"methods": ["find", "calculate"], "objects": ["momentum", "impulse", "collision"], "keywords": ["coefficient of restitution", "impact", "impulse"]},
-        },
-        "connected_particles_energy": {
-            "general": {"methods": ["find", "calculate", "use conservation of energy"], "objects": ["connected particles", "energy"], "keywords": ["pulley", "tension", "kinetic energy", "potential energy"]},
-        },
-        "rough_plane_energy": {
-            "general": {"methods": ["find", "calculate", "use conservation of energy"], "objects": ["rough plane", "energy"], "keywords": ["friction", "work done against friction", "kinetic energy"]},
-        },
-        "power_and_resistance": {
-            "general": {"methods": ["find", "calculate"], "objects": ["power", "resistance"], "keywords": ["engine power", "resistance", "speed"]},
-        },
-    },
-    "P5": {
-        "data_representation": {
-            "general": {"methods": ["draw", "complete", "interpret"], "objects": ["histogram", "box plot", "cumulative frequency graph", "stem-and-leaf"], "keywords": ["quartile", "median", "frequency density"]},
-        },
-        "measures_of_central_tendency_and_dispersion": {
-            "general": {"methods": ["find", "calculate", "estimate"], "objects": ["mean", "variance", "standard deviation", "interquartile range"], "keywords": ["coding", "combined mean", "combined standard deviation", "quartile", "IQR"]},
-        },
-        "permutations_and_combinations": {
-            "general": {"methods": ["find", "calculate"], "objects": ["arrangement", "selection", "committee"], "keywords": ["arrangements", "different ways", "letters", "digits", "committee", "choose"]},
-        },
-        "probability": {
-            "general": {"methods": ["find", "calculate", "draw", "use"], "objects": ["probability", "conditional probability", "tree diagram"], "keywords": ["P(", "given that", "independent", "tree diagram"]},
-        },
-        "probability_distributions": {
-            "general": {"methods": ["find", "calculate"], "objects": ["probability distribution", "random variable"], "keywords": ["probability distribution table", "E(X)", "Var(X)", "P(X=x)"]},
-        },
-        "geometric_distribution": {
-            "general": {"methods": ["find", "calculate"], "objects": ["geometric distribution"], "keywords": ["first success", "until the first", "geometric distribution"]},
-        },
-        "binomial_distribution": {
-            "general": {"methods": ["find", "calculate"], "objects": ["binomial distribution"], "keywords": ["X ~ B", "Bin", "binomial distribution", "n trials"]},
-        },
-        "normal_distribution": {
-            "general": {"methods": ["find", "calculate"], "objects": ["normal distribution"], "keywords": ["normal distribution", "standard deviation", "z", "standardise", "percentage point"]},
-        },
-    },
-    "P6": {
-        "continuous_random_variables": {
-            "density_functions": {"methods": ["find", "show"], "objects": ["probability density function"], "keywords": ["density"]},
-            "expectation_variance": {"methods": ["find", "calculate"], "objects": ["expectation", "variance"], "keywords": ["integral"]},
-        },
-        "confidence_intervals": {
-            "population_mean": {"methods": ["find", "construct"], "objects": ["confidence interval"], "keywords": ["population mean"]},
-        },
-        "hypothesis_testing": {
-            "binomial": {"methods": ["test"], "objects": ["binomial distribution"], "keywords": ["hypothesis", "significance"]},
-            "poisson": {"methods": ["test"], "objects": ["poisson distribution"], "keywords": ["hypothesis", "significance"]},
-            "normal": {"methods": ["test"], "objects": ["normal distribution"], "keywords": ["hypothesis", "significance"]},
-        },
-        "central_limit_theorem": {
-            "approximation_using_clt": {"methods": ["approximate"], "objects": ["central limit theorem"], "keywords": ["large sample"]},
-        },
-    },
-}
 
-DEFAULT_TOPIC_TAXONOMY = _flatten_topic_taxonomy(DEFAULT_PAPER_FAMILY_TAXONOMY)
-DEFAULT_CLASSIFICATION_HINTS = _deep_merge_dicts(
-    _auto_classification_hints(DEFAULT_PAPER_FAMILY_TAXONOMY),
-    CAIE_CLASSIFICATION_HINTS,
-)
-DEFAULT_TOPICS = list(DEFAULT_TOPIC_TAXONOMY)
+def _copied_classification_hints() -> dict[str, dict[str, dict[str, dict[str, list[str]]]]]:
+    merged = _deep_merge_dicts(_auto_classification_hints(_copied_paper_family_taxonomy()), CLASSIFICATION_HINT_OVERRIDES)
+    return {
+        family: {
+            topic: {subtopic: {kind: list(values) for kind, values in hints.items()} for subtopic, hints in subtopics.items()}
+            for topic, subtopics in topics.items()
+        }
+        for family, topics in merged.items()
+    }
 
-DIFFICULTY_LABELS = ["easy", "average", "difficult"]
 
-DEFAULT_DIFFICULTY_HEURISTICS = {
-    "P1": {
-        "routine_easy_topics": ["quadratics", "functions", "differentiation"],
-        "difficult_topics": ["binomial_expansion", "integration", "series_and_sequences"],
-        "linked_keywords": ["hence", "deduce", "using your answer"],
-        "disguised_keywords": ["show that", "prove", "given that"],
-    },
-    "P2": {
-        "routine_easy_topics": ["differentiation", "integration"],
-        "difficult_topics": ["numerical_methods", "logarithmic_and_exponential_functions"],
-        "linked_keywords": ["hence", "deduce", "using your answer"],
-        "disguised_keywords": ["show that", "prove", "given that"],
-    },
-    "P3": {
-        "routine_easy_topics": ["logarithms_and_exponentials"],
-        "difficult_topics": ["complex_numbers", "vectors", "differential_equations", "implicit_differentiation", "partial_fractions"],
-        "linked_keywords": ["hence", "deduce", "using your answer"],
-        "disguised_keywords": ["show that", "prove", "given that", "locus"],
-    },
-    "P4": {
-        "routine_easy_topics": ["kinematics_constant_acceleration"],
-        "difficult_topics": ["connected_particles", "connected_particles_energy", "momentum_impulse", "rough_plane_energy", "power_and_resistance"],
-        "linked_keywords": ["hence", "therefore", "subsequently"],
-        "disguised_keywords": ["model", "limiting", "coefficient of restitution"],
-    },
-    "P5": {
-        "routine_easy_topics": ["data_representation"],
-        "difficult_topics": ["probability", "probability_distributions", "normal_distribution", "geometric_distribution"],
-        "linked_keywords": ["given that", "conditional", "interpret"],
-        "disguised_keywords": ["justify", "comment", "in context"],
-    },
-    "P6": {
-        "routine_easy_topics": [],
-        "difficult_topics": ["continuous_random_variables", "confidence_intervals", "hypothesis_testing", "central_limit_theorem"],
-        "linked_keywords": ["given that", "conditional", "interpret"],
-        "disguised_keywords": ["justify", "comment", "in context"],
-    },
-    "unknown": {
-        "routine_easy_topics": [],
-        "difficult_topics": [],
-        "linked_keywords": ["hence", "deduce", "given that"],
-        "disguised_keywords": ["show that", "prove"],
-    },
-}
+def _copied_difficulty_heuristics() -> dict[str, dict[str, list[str]]]:
+    return {family: {key: list(values) for key, values in data.items()} for family, data in DIFFICULTY_HEURISTICS.items()}
+
+
+def _copied_topic_taxonomy() -> dict[str, list[str]]:
+    return {key: list(value) for key, value in _flatten_topic_taxonomy(_copied_paper_family_taxonomy()).items()}
+
+
+@dataclass(frozen=True)
+class RuntimeConfig:
+    taxonomy_source: Path = field(default_factory=lambda: RUNTIME_PROFILE_PATH)
+    taxonomy: str = RUNTIME_TAXONOMY
+    input_document_types: list[str] = field(default_factory=lambda: list(ACTIVE_INPUT_DOCUMENT_TYPES))
+    archived_input_document_types: list[str] = field(default_factory=lambda: list(ARCHIVED_INPUT_DOCUMENT_TYPES))
+    output_layout: str = OUTPUT_LAYOUT
+    topic_mode: str = TOPIC_MODE
+    active_outputs: list[str] = field(default_factory=lambda: list(ACTIVE_OUTPUTS))
+    archived_runtime_surfaces: list[str] = field(default_factory=lambda: list(ARCHIVED_RUNTIME_SURFACES))
+
+    def supports_input_document_type(self, document_type: str) -> bool:
+        return document_type in self.input_document_types
 
 
 @dataclass
@@ -855,11 +121,16 @@ class InputConfig:
 
 @dataclass
 class OutputConfig:
-    images_dir: Path = Path("output/images")
     json_dir: Path = Path("output/json")
-    csv_dir: Path = Path("output/csv")
-    review_dir: Path = Path("output/review")
     debug_dir: Path = Path("output/debug")
+
+    def root_dir(self) -> Path:
+        return self.json_dir.parent
+
+    def apply_root(self, root: str | Path) -> None:
+        root = Path(root)
+        self.json_dir = root / "json"
+        self.debug_dir = root / "debug"
 
 
 @dataclass
@@ -902,10 +173,7 @@ class OCRConfig:
 
 @dataclass
 class NamingConfig:
-    image_template: str = "{paper_name}_q{question_number:02d}.png"
     json_name: str = "question_bank.json"
-    csv_name: str = "question_bank.csv"
-    review_name: str = "review_items.csv"
 
 
 @dataclass
@@ -914,54 +182,6 @@ class ClassificationConfig:
     openai_model: str = "gpt-5-mini"
     openai_timeout_seconds: int = 30
     uncertainty_threshold: float = 0.55
-
-
-@dataclass
-class TopicPDFConfig:
-    enable_topic_pdfs: bool = False
-    topic_pdf_output_dir: Path = Path("output/topic_pdfs")
-    embed_mark_schemes: bool = True
-    page_size: str = "A4"
-    margin: float = 42
-    image_max_width: float = 500
-    caption_font_size: float = 8
-    section_heading_font_size: float = 15
-    topic_title_font_size: float = 22
-
-
-@dataclass
-class BugReportConfig:
-    enabled: bool = True
-    form_url: str = ""
-    open_in_new_tab: bool = True
-    enable_copy_button: bool = True
-    form_field_names: dict[str, str] = field(
-        default_factory=lambda: {
-            "paper": "paper",
-            "topic": "topic",
-            "question_number": "question_number",
-            "marks": "marks",
-            "source_pdf": "source_pdf",
-            "question_image": "question_image",
-            "markscheme_image": "markscheme_image",
-            "report_text": "report_text",
-        }
-    )
-
-
-@dataclass
-class PracticePageConfig:
-    publish_enabled: bool = True
-    publish_dir: Path = Path("practice")
-    publish_assets: bool = True
-    publish_asset_dir: str = "assets"
-    github_pages_url: str = ""
-    bug_report: BugReportConfig = field(default_factory=BugReportConfig)
-
-
-@dataclass
-class ManualReviewConfig:
-    output_dir: Path = Path("output/manual_review")
 
 
 @dataclass
@@ -976,65 +196,40 @@ class DebugConfig:
 
 @dataclass
 class AppConfig:
+    runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     input: InputConfig = field(default_factory=InputConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     paper_families: list[str] = field(default_factory=lambda: list(PAPER_FAMILIES))
-    paper_family_taxonomy: dict[str, dict[str, list[str]]] = field(
-        default_factory=lambda: {
-            family: {topic: list(subtopics) for topic, subtopics in topics.items()}
-            for family, topics in DEFAULT_PAPER_FAMILY_TAXONOMY.items()
-        }
-    )
-    topics: list[str] = field(default_factory=lambda: list(DEFAULT_TOPICS))
-    topic_taxonomy: dict[str, list[str]] = field(default_factory=lambda: {key: list(value) for key, value in DEFAULT_TOPIC_TAXONOMY.items()})
-    classification_hints: dict[str, dict[str, dict[str, dict[str, list[str]]]]] = field(
-        default_factory=lambda: {
-            family: {
-                topic: {subtopic: {kind: list(values) for kind, values in hints.items()} for subtopic, hints in subtopics.items()}
-                for topic, subtopics in topics.items()
-            }
-            for family, topics in DEFAULT_CLASSIFICATION_HINTS.items()
-        }
-    )
-    difficulty_heuristics: dict[str, dict[str, list[str]]] = field(
-        default_factory=lambda: {family: {key: list(values) for key, values in data.items()} for family, data in DEFAULT_DIFFICULTY_HEURISTICS.items()}
-    )
+    paper_family_taxonomy: dict[str, dict[str, list[str]]] = field(default_factory=_copied_paper_family_taxonomy)
+    topics: list[str] = field(default_factory=lambda: list(_copied_topic_taxonomy()))
+    topic_taxonomy: dict[str, list[str]] = field(default_factory=_copied_topic_taxonomy)
+    classification_hints: dict[str, dict[str, dict[str, dict[str, list[str]]]]] = field(default_factory=_copied_classification_hints)
+    difficulty_heuristics: dict[str, dict[str, list[str]]] = field(default_factory=_copied_difficulty_heuristics)
     difficulty_labels: list[str] = field(default_factory=lambda: list(DIFFICULTY_LABELS))
     detection: DetectionConfig = field(default_factory=DetectionConfig)
     ocr: OCRConfig = field(default_factory=OCRConfig)
     naming: NamingConfig = field(default_factory=NamingConfig)
     classification: ClassificationConfig = field(default_factory=ClassificationConfig)
-    topic_pdfs: TopicPDFConfig = field(default_factory=TopicPDFConfig)
-    practice_page: PracticePageConfig = field(default_factory=PracticePageConfig)
-    manual_review: ManualReviewConfig = field(default_factory=ManualReviewConfig)
     debug: DebugConfig = field(default_factory=DebugConfig)
 
     def ensure_output_dirs(self) -> None:
-        for directory in [
-            self.output.images_dir,
-            self.output.json_dir,
-            self.output.csv_dir,
-            self.output.review_dir,
-        ]:
-            directory.mkdir(parents=True, exist_ok=True)
+        self.output.root_dir().mkdir(parents=True, exist_ok=True)
+        self.output.json_dir.mkdir(parents=True, exist_ok=True)
         if self.debug.enabled:
             self.output.debug_dir.mkdir(parents=True, exist_ok=True)
-        if self.topic_pdfs.enable_topic_pdfs:
-            self.topic_pdfs.topic_pdf_output_dir.mkdir(parents=True, exist_ok=True)
-        self.manual_review.output_dir.mkdir(parents=True, exist_ok=True)
 
 
 def load_config(path: str | Path | None = None) -> AppConfig:
     config = AppConfig()
+    validate_config(config)
     config_path = Path(path) if path else Path("config.yaml")
     if not config_path.exists():
-        validate_config(config)
         return config
 
     try:
         import yaml
     except ImportError as exc:
-        raise RuntimeError("PyYAML is required to read config.yaml. Run `pip install -r requirements.txt`.") from exc
+        raise RuntimeError("PyYAML is required to read config.yaml. Install the project dependencies first.") from exc
 
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     if not isinstance(raw, dict):
@@ -1046,48 +241,13 @@ def load_config(path: str | Path | None = None) -> AppConfig:
 
 
 def validate_config(config: AppConfig) -> None:
-    if config.paper_families != PAPER_FAMILIES:
-        raise ValueError(f"Paper families must be exactly {PAPER_FAMILIES}.")
-    for family in config.paper_family_taxonomy:
-        if family not in config.paper_families:
-            raise ValueError(f"paper_family_taxonomy contains unknown paper family `{family}`.")
-    for family in config.paper_families:
-        config.paper_family_taxonomy.setdefault(family, {})
-
-    for family, topics in config.paper_family_taxonomy.items():
-        if family != "unknown" and (not isinstance(topics, dict) or not topics):
-            raise ValueError(f"paper_family_taxonomy.{family} must contain at least one topic.")
-        if not isinstance(topics, dict):
-            raise ValueError(f"paper_family_taxonomy.{family} must be a mapping.")
-        for topic, subtopics in topics.items():
-            if not isinstance(topic, str) or not topic.strip():
-                raise ValueError(f"Every topic label for {family} must be a non-empty string.")
-            if not isinstance(subtopics, list) or not subtopics:
-                raise ValueError(f"paper_family_taxonomy.{family}.{topic} must contain at least one subtopic.")
-            for subtopic in subtopics:
-                if not isinstance(subtopic, str) or not subtopic.strip():
-                    raise ValueError(f"Every subtopic for {family}.{topic} must be a non-empty string.")
-
+    if config.paper_families != list(PAPER_FAMILIES):
+        raise ValueError(f"Paper families must be exactly {list(PAPER_FAMILIES)}.")
     config.topic_taxonomy = _flatten_topic_taxonomy(config.paper_family_taxonomy)
     config.topics = list(config.topic_taxonomy)
 
-    merged_hints = _deep_merge_dicts(_auto_classification_hints(config.paper_family_taxonomy), config.classification_hints)
-    valid_hints: dict[str, dict[str, dict[str, dict[str, list[str]]]]] = {}
-    for family, topics in merged_hints.items():
-        if family not in config.paper_family_taxonomy or not isinstance(topics, dict):
-            continue
-        for topic, subtopics in topics.items():
-            if topic not in config.paper_family_taxonomy[family] or not isinstance(subtopics, dict):
-                continue
-            for subtopic, hints in subtopics.items():
-                if subtopic not in config.paper_family_taxonomy[family][topic]:
-                    continue
-                _validate_hint_groups(hints, f"classification_hints.{family}.{topic}.{subtopic}")
-                valid_hints.setdefault(family, {}).setdefault(topic, {})[subtopic] = hints
-    config.classification_hints = valid_hints
-
-    if config.difficulty_labels != DIFFICULTY_LABELS:
-        raise ValueError(f"Difficulty labels must be exactly {DIFFICULTY_LABELS}.")
+    if config.difficulty_labels != list(DIFFICULTY_LABELS):
+        raise ValueError(f"Difficulty labels must be exactly {list(DIFFICULTY_LABELS)}.")
     if not isinstance(config.difficulty_heuristics, dict):
         raise ValueError("difficulty_heuristics must be a mapping.")
     if not 0 <= config.classification.uncertainty_threshold <= 1:
@@ -1102,59 +262,46 @@ def validate_config(config: AppConfig) -> None:
         config.detection.output_mode = "prompt_only"
     if not 0 < config.detection.max_crop_height_ratio <= 1:
         raise ValueError("detection.max_crop_height_ratio must be between 0 and 1.")
-    if config.topic_pdfs.page_size.upper() not in {"A4", "LETTER"}:
-        raise ValueError("topic_pdfs.page_size must be `A4` or `LETTER`.")
-    if config.topic_pdfs.margin < 0:
-        raise ValueError("topic_pdfs.margin must be non-negative.")
-    if config.topic_pdfs.image_max_width <= 0:
-        raise ValueError("topic_pdfs.image_max_width must be positive.")
-    if config.topic_pdfs.caption_font_size <= 0:
-        raise ValueError("topic_pdfs.caption_font_size must be positive.")
-    if config.topic_pdfs.section_heading_font_size <= 0:
-        raise ValueError("topic_pdfs.section_heading_font_size must be positive.")
-    if config.topic_pdfs.topic_title_font_size <= 0:
-        raise ValueError("topic_pdfs.topic_title_font_size must be positive.")
-    if not isinstance(config.practice_page.bug_report.form_field_names, dict):
-        raise ValueError("practice_page.bug_report.form_field_names must be a mapping.")
-    if not all(isinstance(key, str) and isinstance(value, str) for key, value in config.practice_page.bug_report.form_field_names.items()):
-        raise ValueError("practice_page.bug_report.form_field_names keys and values must be strings.")
-    if not config.practice_page.publish_asset_dir.strip():
-        raise ValueError("practice_page.publish_asset_dir must be non-empty.")
+
+def _deprecated_runtime_key_error(key: str) -> ValueError:
+    return ValueError(
+        f"Config key `{key}` is deprecated. Runtime taxonomy now comes from `{RUNTIME_PROFILE_PATH.name}`; "
+        "keep YAML overrides for operational settings only."
+    )
 
 
-def _validate_hint_groups(hints: Any, location: str) -> None:
-    if not isinstance(hints, dict):
-        raise ValueError(f"{location} must be a mapping.")
-    for hint_kind, patterns in hints.items():
-        if hint_kind not in {"methods", "objects", "keywords"}:
-            raise ValueError(f"{location} contains unknown hint group `{hint_kind}`.")
-        if not isinstance(patterns, list) or not all(isinstance(pattern, str) for pattern in patterns):
-            raise ValueError(f"{location}.{hint_kind} must be a list of strings.")
+def _archived_surface_key_error(key: str) -> ValueError:
+    return ValueError(
+        f"Config section `{key}` is archived and not part of the active extraction pipeline. "
+        "The supported workflow is question-paper and mark-scheme extraction only."
+    )
+
+
+def _removed_output_key_error(key: str) -> ValueError:
+    return ValueError(
+        f"Config key `output.{key}` is no longer supported. Output now uses the paper-first root plus "
+        "`output.json_dir` and optional `output.debug_dir`."
+    )
+
+
+def _removed_naming_key_error(key: str) -> ValueError:
+    return ValueError(
+        f"Config key `naming.{key}` is no longer supported. The active pipeline names images by paper and "
+        "question automatically and only keeps `naming.json_name` configurable."
+    )
 
 
 def _apply_mapping(config: AppConfig, raw: dict[str, Any]) -> None:
     for key, value in raw.items():
-        if key in {"input", "output", "detection", "ocr", "naming", "classification", "topic_pdfs", "practice_page", "manual_review", "debug"}:
+        if key in {"runtime", "paper_families", "paper_family_taxonomy", "classification_hints", "difficulty_heuristics", "difficulty_labels", "topics", "topic_taxonomy"}:
+            raise _deprecated_runtime_key_error(key)
+        if key in {"topic_pdfs", "practice_page", "manual_review"}:
+            raise _archived_surface_key_error(key)
+        if key in {"input", "output", "detection", "ocr", "naming", "classification", "debug"}:
             target = getattr(config, key)
             if not isinstance(value, dict):
                 raise ValueError(f"Config section `{key}` must be a mapping.")
             _set_dataclass_fields(target, value, path_fields=key in {"input", "output"})
-            if key == "topic_pdfs" and "topic_pdf_output_dir" in value:
-                target.topic_pdf_output_dir = Path(target.topic_pdf_output_dir)
-        elif key == "classification_hints":
-            if not isinstance(value, dict):
-                raise ValueError("Config section `classification_hints` must be a mapping.")
-            config.classification_hints = _deep_merge_dicts(config.classification_hints, value)
-        elif key == "paper_family_taxonomy":
-            if not isinstance(value, dict):
-                raise ValueError("Config section `paper_family_taxonomy` must be a mapping.")
-            config.paper_family_taxonomy = value
-        elif key == "difficulty_heuristics":
-            if not isinstance(value, dict):
-                raise ValueError("Config section `difficulty_heuristics` must be a mapping.")
-            config.difficulty_heuristics = _deep_merge_dicts(config.difficulty_heuristics, value)
-        elif key in {"paper_families", "topics", "topic_taxonomy", "difficulty_labels"}:
-            setattr(config, key, value)
         else:
             raise ValueError(f"Unknown config key `{key}`.")
 
@@ -1163,14 +310,17 @@ def _set_dataclass_fields(target: object, values: dict[str, Any], path_fields: b
     valid = set(target.__dataclass_fields__)  # type: ignore[attr-defined]
     for key, value in values.items():
         if key not in valid:
+            if isinstance(target, OutputConfig) and key in {"images_dir", "csv_dir", "review_dir"}:
+                raise _removed_output_key_error(key)
+            if isinstance(target, NamingConfig) and key in {"image_template", "csv_name", "review_name"}:
+                raise _removed_naming_key_error(key)
             raise ValueError(f"Unknown config key `{key}` in {target.__class__.__name__}.")
         current = getattr(target, key)
         if is_dataclass(current) and isinstance(value, dict):
             _set_dataclass_fields(current, value, path_fields=False)
             continue
         if isinstance(current, Path):
-            value = Path(value)
-            setattr(target, key, value)
+            setattr(target, key, Path(value))
             continue
         if path_fields:
             value = Path(value)

@@ -12,6 +12,7 @@ from .image_limits import cap_image_pixels, render_pdf_area
 from .identifiers import normalize_question_id, parent_question_id
 from .models import BoundingBox, PageLayout, QuestionStart, TextBlock
 from .mupdf_tools import quiet_mupdf
+from .output_layout import mark_scheme_image_output_path
 from .pdf_extract import _visual_box_from_rect
 from .pdf_extract import extract_pdf_layout
 from .question_detection import parse_question_start
@@ -1696,18 +1697,15 @@ def _mark_scheme_crop_confidence(
 
 
 def _mark_scheme_image_path(mark_scheme_pdf: Path, question_number: str, config: AppConfig) -> Path:
-    paper_name = _safe_basename(mark_scheme_pdf.stem)
-    if question_number.isdigit():
-        qid = f"q{int(question_number):02d}"
-    else:
-        qid = f"q{_safe_basename(question_number)}"
-    return config.output.images_dir / f"{paper_name}_ms_{qid}.png"
+    return mark_scheme_image_output_path(mark_scheme_pdf, question_number, config)
 
 
 def _clear_stale_mark_scheme_images(mark_scheme_pdf: Path, expected_numbers: list[str], config: AppConfig) -> None:
-    paper_name = _safe_basename(mark_scheme_pdf.stem)
     expected_paths = {_mark_scheme_image_path(mark_scheme_pdf, number, config) for number in expected_numbers}
-    for path in config.output.images_dir.glob(f"{paper_name}_ms_q*.png"):
+    mark_scheme_dir = _mark_scheme_image_path(mark_scheme_pdf, expected_numbers[0], config).parent if expected_numbers else None
+    if mark_scheme_dir is None or not mark_scheme_dir.exists():
+        return
+    for path in mark_scheme_dir.glob("q*.png"):
         if path not in expected_paths:
             path.unlink(missing_ok=True)
 

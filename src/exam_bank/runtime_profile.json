@@ -1,0 +1,1540 @@
+{
+  "schema_version": 1,
+  "product_direction": {
+    "runtime_taxonomy": "paper_only",
+    "active_input_document_types": [
+      "question_paper",
+      "mark_scheme"
+    ],
+    "archived_input_document_types": [
+      "examiner_report"
+    ],
+    "output_layout": "paper_first",
+    "topic_mode": "metadata_only",
+    "active_outputs": [
+      "paper_exports",
+      "json_metadata"
+    ],
+    "archived_runtime_surfaces": [
+      "topic_pdfs",
+      "practice_page",
+      "manual_review",
+      "qa",
+      "review"
+    ]
+  },
+  "paper_families": [
+    "P1",
+    "P2",
+    "P3",
+    "P4",
+    "P5",
+    "P6",
+    "unknown"
+  ],
+  "session_aliases": {
+    "m": "March",
+    "march": "March",
+    "mar": "March",
+    "s": "MayJune",
+    "summer": "MayJune",
+    "may": "MayJune",
+    "june": "MayJune",
+    "mayjune": "MayJune",
+    "may_june": "MayJune",
+    "mj": "MayJune",
+    "w": "OctNov",
+    "winter": "OctNov",
+    "oct": "OctNov",
+    "october": "October",
+    "nov": "November",
+    "november": "November",
+    "octnov": "OctNov",
+    "oct_nov": "OctNov",
+    "october_november": "OctNov",
+    "on": "OctNov"
+  },
+  "document_types": {
+    "aliases": {
+      "qp": "question_paper",
+      "questionpaper": "question_paper",
+      "question_paper": "question_paper",
+      "question": "question_paper",
+      "ms": "mark_scheme",
+      "markscheme": "mark_scheme",
+      "mark_scheme": "mark_scheme",
+      "scheme": "mark_scheme",
+      "er": "examiner_report",
+      "examinerreport": "examiner_report",
+      "examiner_report": "examiner_report",
+      "report": "examiner_report"
+    },
+    "compact_codes": {
+      "question_paper": "QP",
+      "mark_scheme": "MS",
+      "examiner_report": "ER",
+      "QP": "QP",
+      "MS": "MS",
+      "ER": "ER"
+    }
+  },
+  "paper_family_taxonomy": {
+    "P1": {
+      "algebra": [
+        "general"
+      ],
+      "quadratics": [
+        "general"
+      ],
+      "functions": [
+        "general"
+      ],
+      "coordinate_geometry": [
+        "general"
+      ],
+      "circular_measure": [
+        "general"
+      ],
+      "trigonometry": [
+        "general"
+      ],
+      "series_and_sequences": [
+        "general"
+      ],
+      "binomial_expansion": [
+        "general"
+      ],
+      "differentiation": [
+        "general"
+      ],
+      "integration": [
+        "general"
+      ]
+    },
+    "P2": {
+      "logarithmic_and_exponential_functions": [
+        "general"
+      ],
+      "trigonometry": [
+        "general"
+      ],
+      "differentiation": [
+        "general"
+      ],
+      "integration": [
+        "general"
+      ]
+    },
+    "P3": {
+      "algebra": [
+        "general"
+      ],
+      "modulus": [
+        "general"
+      ],
+      "logarithms_and_exponentials": [
+        "general"
+      ],
+      "functions": [
+        "general"
+      ],
+      "numerical_methods": [
+        "general"
+      ],
+      "trigonometry": [
+        "general"
+      ],
+      "integration": [
+        "general"
+      ],
+      "differentiation": [
+        "general"
+      ],
+      "differential_equations": [
+        "general"
+      ],
+      "binomial_expansion": [
+        "general"
+      ],
+      "implicit_differentiation": [
+        "general"
+      ],
+      "partial_fractions": [
+        "general"
+      ],
+      "vectors": [
+        "general"
+      ],
+      "complex_numbers": [
+        "general"
+      ],
+      "polynomials": [
+        "general"
+      ],
+      "parametric_equations": [
+        "general"
+      ]
+    },
+    "P4": {
+      "kinematics_constant_acceleration": [
+        "general"
+      ],
+      "kinematics_graphs": [
+        "general"
+      ],
+      "kinematics_variable_functions": [
+        "general"
+      ],
+      "forces_newtons_second_law": [
+        "general"
+      ],
+      "equilibrium_coplanar_forces": [
+        "general"
+      ],
+      "equilibrium_particle": [
+        "general"
+      ],
+      "friction_rough_plane": [
+        "general"
+      ],
+      "connected_particles": [
+        "general"
+      ],
+      "momentum_impulse": [
+        "general"
+      ],
+      "work_energy_power": [
+        "general"
+      ],
+      "connected_particles_energy": [
+        "general"
+      ],
+      "rough_plane_energy": [
+        "general"
+      ],
+      "power_and_resistance": [
+        "general"
+      ]
+    },
+    "P5": {
+      "data_representation": [
+        "general"
+      ],
+      "measures_of_central_tendency_and_dispersion": [
+        "general"
+      ],
+      "permutations_and_combinations": [
+        "general"
+      ],
+      "probability": [
+        "general"
+      ],
+      "probability_distributions": [
+        "general"
+      ],
+      "geometric_distribution": [
+        "general"
+      ],
+      "binomial_distribution": [
+        "general"
+      ],
+      "normal_distribution": [
+        "general"
+      ]
+    },
+    "P6": {
+      "probability": [
+        "general"
+      ],
+      "continuous_random_variables": [
+        "general"
+      ],
+      "normal_distribution": [
+        "general"
+      ],
+      "central_limit_theorem": [
+        "general"
+      ],
+      "confidence_intervals": [
+        "general"
+      ],
+      "hypothesis_testing": [
+        "general"
+      ]
+    },
+    "unknown": {}
+  },
+  "classification_hints": {
+    "P1": {
+      "algebra": {
+        "general": {
+          "methods": [
+            "simplify",
+            "solve",
+            "factorise",
+            "express"
+          ],
+          "objects": [
+            "algebraic expression",
+            "equation"
+          ],
+          "keywords": [
+            "surd",
+            "rearrange",
+            "substitute"
+          ]
+        }
+      },
+      "quadratics": {
+        "general": {
+          "methods": [
+            "solve",
+            "find",
+            "show"
+          ],
+          "objects": [
+            "quadratic",
+            "quadratic equation",
+            "discriminant"
+          ],
+          "keywords": [
+            "roots",
+            "equal roots",
+            "real roots",
+            "intersection"
+          ]
+        }
+      },
+      "functions": {
+        "general": {
+          "methods": [
+            "find",
+            "show",
+            "state",
+            "describe",
+            "sketch"
+          ],
+          "objects": [
+            "function",
+            "composite function",
+            "inverse function",
+            "domain",
+            "range",
+            "transformation"
+          ],
+          "keywords": [
+            "f(g",
+            "g(f",
+            "inverse",
+            "domain",
+            "range",
+            "translation",
+            "stretch",
+            "reflection"
+          ]
+        }
+      },
+      "coordinate_geometry": {
+        "general": {
+          "methods": [
+            "find the equation",
+            "show",
+            "find"
+          ],
+          "objects": [
+            "straight line",
+            "circle",
+            "gradient",
+            "centre",
+            "radius"
+          ],
+          "keywords": [
+            "perpendicular",
+            "parallel",
+            "intersection",
+            "diameter",
+            "midpoint"
+          ]
+        }
+      },
+      "circular_measure": {
+        "general": {
+          "methods": [
+            "find",
+            "calculate"
+          ],
+          "objects": [
+            "radian",
+            "arc",
+            "sector",
+            "segment"
+          ],
+          "keywords": [
+            "theta",
+            "arc length",
+            "sector area"
+          ]
+        }
+      },
+      "trigonometry": {
+        "general": {
+          "methods": [
+            "solve",
+            "prove",
+            "show",
+            "sketch"
+          ],
+          "objects": [
+            "trigonometric equation",
+            "identity",
+            "trig graph"
+          ],
+          "keywords": [
+            "sin",
+            "cos",
+            "tan",
+            "period",
+            "amplitude"
+          ]
+        }
+      },
+      "series_and_sequences": {
+        "general": {
+          "methods": [
+            "find",
+            "calculate",
+            "show"
+          ],
+          "objects": [
+            "sequence",
+            "series",
+            "arithmetic progression",
+            "geometric progression"
+          ],
+          "keywords": [
+            "AP",
+            "GP",
+            "sum to infinity",
+            "common difference",
+            "common ratio"
+          ]
+        }
+      },
+      "binomial_expansion": {
+        "general": {
+          "methods": [
+            "expand",
+            "approximate",
+            "find"
+          ],
+          "objects": [
+            "binomial",
+            "binomial expansion",
+            "coefficient"
+          ],
+          "keywords": [
+            "ascending powers",
+            "valid for",
+            "coefficient",
+            "term independent of x"
+          ]
+        }
+      },
+      "differentiation": {
+        "general": {
+          "methods": [
+            "differentiate",
+            "find dy/dx",
+            "find the equation"
+          ],
+          "objects": [
+            "derivative",
+            "gradient",
+            "stationary point",
+            "tangent",
+            "normal"
+          ],
+          "keywords": [
+            "dy/dx",
+            "maximum",
+            "minimum"
+          ]
+        }
+      },
+      "integration": {
+        "general": {
+          "methods": [
+            "integrate",
+            "evaluate",
+            "find the area",
+            "calculate the area"
+          ],
+          "objects": [
+            "integral",
+            "definite integral",
+            "curve",
+            "volume"
+          ],
+          "keywords": [
+            "constant of integration",
+            "limits",
+            "area under",
+            "volume of revolution"
+          ]
+        }
+      }
+    },
+    "P2": {
+      "logarithmic_and_exponential_functions": {
+        "log_laws": {
+          "methods": [
+            "simplify",
+            "show"
+          ],
+          "objects": [
+            "logarithm"
+          ],
+          "keywords": [
+            "log",
+            "ln"
+          ]
+        },
+        "exponential_equations": {
+          "methods": [
+            "solve"
+          ],
+          "objects": [
+            "exponential equation"
+          ],
+          "keywords": [
+            "e^",
+            "exp"
+          ]
+        },
+        "logarithmic_equations": {
+          "methods": [
+            "solve"
+          ],
+          "objects": [
+            "logarithmic equation"
+          ],
+          "keywords": [
+            "log",
+            "ln"
+          ]
+        }
+      },
+      "trigonometry": {
+        "trig_equations": {
+          "methods": [
+            "solve"
+          ],
+          "objects": [
+            "trigonometric equation"
+          ],
+          "keywords": [
+            "sin",
+            "cos",
+            "tan"
+          ]
+        },
+        "trig_identities": {
+          "methods": [
+            "prove",
+            "show"
+          ],
+          "objects": [
+            "identity"
+          ],
+          "keywords": [
+            "sin",
+            "cos",
+            "tan"
+          ]
+        }
+      },
+      "differentiation": {
+        "standard_differentiation": {
+          "methods": [
+            "differentiate",
+            "find dy/dx"
+          ],
+          "objects": [
+            "derivative"
+          ],
+          "keywords": [
+            "gradient"
+          ]
+        },
+        "stationary_points": {
+          "methods": [
+            "find"
+          ],
+          "objects": [
+            "stationary point"
+          ],
+          "keywords": [
+            "maximum",
+            "minimum"
+          ]
+        }
+      },
+      "integration": {
+        "standard_integration": {
+          "methods": [
+            "integrate"
+          ],
+          "objects": [
+            "integral"
+          ],
+          "keywords": []
+        },
+        "area_under_curve": {
+          "methods": [
+            "find the area"
+          ],
+          "objects": [
+            "curve"
+          ],
+          "keywords": [
+            "area under"
+          ]
+        }
+      }
+    },
+    "P3": {
+      "algebra": {
+        "general": {
+          "methods": [
+            "simplify",
+            "solve",
+            "express"
+          ],
+          "objects": [
+            "equation",
+            "expression"
+          ],
+          "keywords": [
+            "algebraic",
+            "substitute",
+            "rearrange"
+          ]
+        }
+      },
+      "modulus": {
+        "general": {
+          "methods": [
+            "solve",
+            "sketch"
+          ],
+          "objects": [
+            "modulus",
+            "absolute value"
+          ],
+          "keywords": [
+            "|x|",
+            "|z|"
+          ]
+        }
+      },
+      "logarithms_and_exponentials": {
+        "general": {
+          "methods": [
+            "solve",
+            "show",
+            "simplify"
+          ],
+          "objects": [
+            "logarithm",
+            "exponential equation"
+          ],
+          "keywords": [
+            "log",
+            "ln",
+            "e^",
+            "exponential"
+          ]
+        }
+      },
+      "trigonometry": {
+        "general": {
+          "methods": [
+            "solve",
+            "show",
+            "prove"
+          ],
+          "objects": [
+            "trigonometric equation",
+            "identity"
+          ],
+          "keywords": [
+            "sin",
+            "cos",
+            "tan",
+            "sec",
+            "cosec",
+            "cot"
+          ]
+        }
+      },
+      "functions": {
+        "general": {
+          "methods": [
+            "find",
+            "show",
+            "state",
+            "sketch"
+          ],
+          "objects": [
+            "function",
+            "composite function",
+            "inverse function",
+            "domain",
+            "range"
+          ],
+          "keywords": [
+            "composite",
+            "inverse",
+            "domain",
+            "range"
+          ]
+        }
+      },
+      "numerical_methods": {
+        "general": {
+          "methods": [
+            "iterate",
+            "estimate"
+          ],
+          "objects": [
+            "iterative formula",
+            "root"
+          ],
+          "keywords": [
+            "x_n",
+            "x_{n+1}",
+            "newton",
+            "change of sign",
+            "fixed point"
+          ]
+        }
+      },
+      "differentiation": {
+        "general": {
+          "methods": [
+            "differentiate",
+            "find the equation"
+          ],
+          "objects": [
+            "derivative",
+            "stationary point",
+            "tangent",
+            "normal"
+          ],
+          "keywords": [
+            "dy/dx",
+            "maximum",
+            "minimum"
+          ]
+        }
+      },
+      "differential_equations": {
+        "general": {
+          "methods": [
+            "solve",
+            "separate variables",
+            "form"
+          ],
+          "objects": [
+            "differential equation"
+          ],
+          "keywords": [
+            "dy/dx",
+            "rate of change"
+          ]
+        }
+      },
+      "integration": {
+        "general": {
+          "methods": [
+            "integrate",
+            "evaluate",
+            "find the area"
+          ],
+          "objects": [
+            "integral",
+            "definite integral"
+          ],
+          "keywords": [
+            "by parts",
+            "substitution",
+            "limits",
+            "area"
+          ]
+        }
+      },
+      "binomial_expansion": {
+        "general": {
+          "methods": [
+            "expand",
+            "approximate"
+          ],
+          "objects": [
+            "binomial",
+            "coefficient"
+          ],
+          "keywords": [
+            "ascending powers",
+            "valid for",
+            "coefficient"
+          ]
+        }
+      },
+      "parametric_equations": {
+        "general": {
+          "methods": [
+            "find dy/dx",
+            "differentiate",
+            "integrate"
+          ],
+          "objects": [
+            "parametric"
+          ],
+          "keywords": [
+            "x =",
+            "y =",
+            "dx/dt",
+            "dy/dt",
+            "parameter"
+          ]
+        }
+      },
+      "implicit_differentiation": {
+        "general": {
+          "methods": [
+            "differentiate",
+            "find dy/dx"
+          ],
+          "objects": [
+            "implicit relation"
+          ],
+          "keywords": [
+            "implicitly",
+            "implicit"
+          ]
+        }
+      },
+      "partial_fractions": {
+        "general": {
+          "methods": [
+            "partial fractions",
+            "express"
+          ],
+          "objects": [
+            "rational function"
+          ],
+          "keywords": [
+            "denominator",
+            "numerator"
+          ]
+        }
+      },
+      "vectors": {
+        "general": {
+          "methods": [
+            "prove",
+            "show",
+            "find"
+          ],
+          "objects": [
+            "vector",
+            "position vector",
+            "vector equation"
+          ],
+          "keywords": [
+            "parallel",
+            "perpendicular",
+            "scalar product"
+          ]
+        }
+      },
+      "complex_numbers": {
+        "general": {
+          "methods": [
+            "sketch",
+            "represent",
+            "find",
+            "solve"
+          ],
+          "objects": [
+            "complex number",
+            "argand diagram",
+            "modulus",
+            "argument"
+          ],
+          "keywords": [
+            "argand",
+            "|z|",
+            "arg z",
+            "complex roots",
+            "locus"
+          ]
+        }
+      },
+      "polynomials": {
+        "general": {
+          "methods": [
+            "find",
+            "show",
+            "factorise"
+          ],
+          "objects": [
+            "polynomial"
+          ],
+          "keywords": [
+            "factor theorem",
+            "remainder theorem",
+            "remainder",
+            "quotient"
+          ]
+        }
+      }
+    },
+    "P4": {
+      "kinematics_constant_acceleration": {
+        "general": {
+          "methods": [
+            "find",
+            "calculate"
+          ],
+          "objects": [
+            "constant acceleration"
+          ],
+          "keywords": [
+            "u",
+            "v",
+            "a",
+            "s",
+            "t",
+            "suvat"
+          ]
+        }
+      },
+      "kinematics_graphs": {
+        "general": {
+          "methods": [
+            "find",
+            "calculate",
+            "sketch"
+          ],
+          "objects": [
+            "velocity-time graph",
+            "speed-time graph",
+            "displacement-time graph"
+          ],
+          "keywords": [
+            "area under",
+            "gradient"
+          ]
+        }
+      },
+      "kinematics_variable_functions": {
+        "general": {
+          "methods": [
+            "differentiate",
+            "integrate",
+            "find"
+          ],
+          "objects": [
+            "velocity",
+            "acceleration",
+            "displacement"
+          ],
+          "keywords": [
+            "v(t)",
+            "a(t)",
+            "s(t)",
+            "particle moves so that"
+          ]
+        }
+      },
+      "forces_newtons_second_law": {
+        "general": {
+          "methods": [
+            "resolve",
+            "find",
+            "calculate"
+          ],
+          "objects": [
+            "force",
+            "newton's second law"
+          ],
+          "keywords": [
+            "ma",
+            "particle",
+            "acceleration"
+          ]
+        }
+      },
+      "equilibrium_coplanar_forces": {
+        "general": {
+          "methods": [
+            "resolve",
+            "find",
+            "calculate"
+          ],
+          "objects": [
+            "coplanar forces",
+            "equilibrium"
+          ],
+          "keywords": [
+            "three forces",
+            "angles",
+            "resultant"
+          ]
+        }
+      },
+      "equilibrium_particle": {
+        "general": {
+          "methods": [
+            "resolve",
+            "find",
+            "calculate"
+          ],
+          "objects": [
+            "particle in equilibrium"
+          ],
+          "keywords": [
+            "equilibrium",
+            "particle"
+          ]
+        }
+      },
+      "friction_rough_plane": {
+        "general": {
+          "methods": [
+            "find",
+            "calculate",
+            "resolve"
+          ],
+          "objects": [
+            "rough plane",
+            "friction"
+          ],
+          "keywords": [
+            "coefficient of friction",
+            "limiting equilibrium",
+            "about to move",
+            "rough plane"
+          ]
+        }
+      },
+      "connected_particles": {
+        "general": {
+          "methods": [
+            "find",
+            "calculate"
+          ],
+          "objects": [
+            "connected particles",
+            "string",
+            "pulley",
+            "tension"
+          ],
+          "keywords": [
+            "tension",
+            "pulley"
+          ]
+        }
+      },
+      "work_energy_power": {
+        "general": {
+          "methods": [
+            "find",
+            "calculate",
+            "use conservation of energy"
+          ],
+          "objects": [
+            "work",
+            "kinetic energy",
+            "potential energy",
+            "power"
+          ],
+          "keywords": [
+            "energy",
+            "work done",
+            "loss of gravitational potential energy"
+          ]
+        }
+      },
+      "momentum_impulse": {
+        "general": {
+          "methods": [
+            "find",
+            "calculate"
+          ],
+          "objects": [
+            "momentum",
+            "impulse",
+            "collision"
+          ],
+          "keywords": [
+            "coefficient of restitution",
+            "impact",
+            "impulse"
+          ]
+        }
+      },
+      "connected_particles_energy": {
+        "general": {
+          "methods": [
+            "find",
+            "calculate",
+            "use conservation of energy"
+          ],
+          "objects": [
+            "connected particles",
+            "energy"
+          ],
+          "keywords": [
+            "pulley",
+            "tension",
+            "kinetic energy",
+            "potential energy"
+          ]
+        }
+      },
+      "rough_plane_energy": {
+        "general": {
+          "methods": [
+            "find",
+            "calculate",
+            "use conservation of energy"
+          ],
+          "objects": [
+            "rough plane",
+            "energy"
+          ],
+          "keywords": [
+            "friction",
+            "work done against friction",
+            "kinetic energy"
+          ]
+        }
+      },
+      "power_and_resistance": {
+        "general": {
+          "methods": [
+            "find",
+            "calculate"
+          ],
+          "objects": [
+            "power",
+            "resistance"
+          ],
+          "keywords": [
+            "engine power",
+            "resistance",
+            "speed"
+          ]
+        }
+      }
+    },
+    "P5": {
+      "data_representation": {
+        "general": {
+          "methods": [
+            "draw",
+            "complete",
+            "interpret"
+          ],
+          "objects": [
+            "histogram",
+            "box plot",
+            "cumulative frequency graph",
+            "stem-and-leaf"
+          ],
+          "keywords": [
+            "quartile",
+            "median",
+            "frequency density"
+          ]
+        }
+      },
+      "measures_of_central_tendency_and_dispersion": {
+        "general": {
+          "methods": [
+            "find",
+            "calculate",
+            "estimate"
+          ],
+          "objects": [
+            "mean",
+            "variance",
+            "standard deviation",
+            "interquartile range"
+          ],
+          "keywords": [
+            "coding",
+            "combined mean",
+            "combined standard deviation",
+            "quartile",
+            "IQR"
+          ]
+        }
+      },
+      "permutations_and_combinations": {
+        "general": {
+          "methods": [
+            "find",
+            "calculate"
+          ],
+          "objects": [
+            "arrangement",
+            "selection",
+            "committee"
+          ],
+          "keywords": [
+            "arrangements",
+            "different ways",
+            "letters",
+            "digits",
+            "committee",
+            "choose"
+          ]
+        }
+      },
+      "probability": {
+        "general": {
+          "methods": [
+            "find",
+            "calculate",
+            "draw",
+            "use"
+          ],
+          "objects": [
+            "probability",
+            "conditional probability",
+            "tree diagram"
+          ],
+          "keywords": [
+            "P(",
+            "given that",
+            "independent",
+            "tree diagram"
+          ]
+        }
+      },
+      "probability_distributions": {
+        "general": {
+          "methods": [
+            "find",
+            "calculate"
+          ],
+          "objects": [
+            "probability distribution",
+            "random variable"
+          ],
+          "keywords": [
+            "probability distribution table",
+            "E(X)",
+            "Var(X)",
+            "P(X=x)"
+          ]
+        }
+      },
+      "geometric_distribution": {
+        "general": {
+          "methods": [
+            "find",
+            "calculate"
+          ],
+          "objects": [
+            "geometric distribution"
+          ],
+          "keywords": [
+            "first success",
+            "until the first",
+            "geometric distribution"
+          ]
+        }
+      },
+      "binomial_distribution": {
+        "general": {
+          "methods": [
+            "find",
+            "calculate"
+          ],
+          "objects": [
+            "binomial distribution"
+          ],
+          "keywords": [
+            "X ~ B",
+            "Bin",
+            "binomial distribution",
+            "n trials"
+          ]
+        }
+      },
+      "normal_distribution": {
+        "general": {
+          "methods": [
+            "find",
+            "calculate"
+          ],
+          "objects": [
+            "normal distribution"
+          ],
+          "keywords": [
+            "normal distribution",
+            "standard deviation",
+            "z",
+            "standardise",
+            "percentage point"
+          ]
+        }
+      }
+    },
+    "P6": {
+      "continuous_random_variables": {
+        "density_functions": {
+          "methods": [
+            "find",
+            "show"
+          ],
+          "objects": [
+            "probability density function"
+          ],
+          "keywords": [
+            "density"
+          ]
+        },
+        "expectation_variance": {
+          "methods": [
+            "find",
+            "calculate"
+          ],
+          "objects": [
+            "expectation",
+            "variance"
+          ],
+          "keywords": [
+            "integral"
+          ]
+        }
+      },
+      "confidence_intervals": {
+        "population_mean": {
+          "methods": [
+            "find",
+            "construct"
+          ],
+          "objects": [
+            "confidence interval"
+          ],
+          "keywords": [
+            "population mean"
+          ]
+        }
+      },
+      "hypothesis_testing": {
+        "binomial": {
+          "methods": [
+            "test"
+          ],
+          "objects": [
+            "binomial distribution"
+          ],
+          "keywords": [
+            "hypothesis",
+            "significance"
+          ]
+        },
+        "poisson": {
+          "methods": [
+            "test"
+          ],
+          "objects": [
+            "poisson distribution"
+          ],
+          "keywords": [
+            "hypothesis",
+            "significance"
+          ]
+        },
+        "normal": {
+          "methods": [
+            "test"
+          ],
+          "objects": [
+            "normal distribution"
+          ],
+          "keywords": [
+            "hypothesis",
+            "significance"
+          ]
+        }
+      },
+      "central_limit_theorem": {
+        "approximation_using_clt": {
+          "methods": [
+            "approximate"
+          ],
+          "objects": [
+            "central limit theorem"
+          ],
+          "keywords": [
+            "large sample"
+          ]
+        }
+      }
+    }
+  },
+  "difficulty_labels": [
+    "easy",
+    "average",
+    "difficult"
+  ],
+  "difficulty_heuristics": {
+    "P1": {
+      "routine_easy_topics": [
+        "quadratics",
+        "functions",
+        "differentiation"
+      ],
+      "difficult_topics": [
+        "binomial_expansion",
+        "integration",
+        "series_and_sequences"
+      ],
+      "linked_keywords": [
+        "hence",
+        "deduce",
+        "using your answer"
+      ],
+      "disguised_keywords": [
+        "show that",
+        "prove",
+        "given that"
+      ]
+    },
+    "P2": {
+      "routine_easy_topics": [
+        "differentiation",
+        "integration"
+      ],
+      "difficult_topics": [
+        "numerical_methods",
+        "logarithmic_and_exponential_functions"
+      ],
+      "linked_keywords": [
+        "hence",
+        "deduce",
+        "using your answer"
+      ],
+      "disguised_keywords": [
+        "show that",
+        "prove",
+        "given that"
+      ]
+    },
+    "P3": {
+      "routine_easy_topics": [
+        "logarithms_and_exponentials"
+      ],
+      "difficult_topics": [
+        "complex_numbers",
+        "vectors",
+        "differential_equations",
+        "implicit_differentiation",
+        "partial_fractions"
+      ],
+      "linked_keywords": [
+        "hence",
+        "deduce",
+        "using your answer"
+      ],
+      "disguised_keywords": [
+        "show that",
+        "prove",
+        "given that",
+        "locus"
+      ]
+    },
+    "P4": {
+      "routine_easy_topics": [
+        "kinematics_constant_acceleration"
+      ],
+      "difficult_topics": [
+        "connected_particles",
+        "connected_particles_energy",
+        "momentum_impulse",
+        "rough_plane_energy",
+        "power_and_resistance"
+      ],
+      "linked_keywords": [
+        "hence",
+        "therefore",
+        "subsequently"
+      ],
+      "disguised_keywords": [
+        "model",
+        "limiting",
+        "coefficient of restitution"
+      ]
+    },
+    "P5": {
+      "routine_easy_topics": [
+        "data_representation"
+      ],
+      "difficult_topics": [
+        "probability",
+        "probability_distributions",
+        "normal_distribution",
+        "geometric_distribution"
+      ],
+      "linked_keywords": [
+        "given that",
+        "conditional",
+        "interpret"
+      ],
+      "disguised_keywords": [
+        "justify",
+        "comment",
+        "in context"
+      ]
+    },
+    "P6": {
+      "routine_easy_topics": [],
+      "difficult_topics": [
+        "continuous_random_variables",
+        "confidence_intervals",
+        "hypothesis_testing",
+        "central_limit_theorem"
+      ],
+      "linked_keywords": [
+        "given that",
+        "conditional",
+        "interpret"
+      ],
+      "disguised_keywords": [
+        "justify",
+        "comment",
+        "in context"
+      ]
+    },
+    "unknown": {
+      "routine_easy_topics": [],
+      "difficult_topics": [],
+      "linked_keywords": [
+        "hence",
+        "deduce",
+        "given that"
+      ],
+      "disguised_keywords": [
+        "show that",
+        "prove"
+      ]
+    }
+  }
+}

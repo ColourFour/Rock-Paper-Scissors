@@ -36,6 +36,10 @@ REPO_J21_P42_QP = Path("input/question_papers/9709 Mathematics June 2021 Questio
 REPO_J21_P42_MS = Path("input/mark_schemes/9709 Mathematics June 2021 Mark Scheme  42.pdf")
 
 
+def _configure_test_output(config: AppConfig, tmp_path: Path) -> None:
+    config.output.apply_root(tmp_path / "output")
+
+
 def test_sample_pipeline_on_march_2019_pdf(tmp_path: Path) -> None:
     pytest.importorskip("fitz")
     pytest.importorskip("PIL")
@@ -44,19 +48,18 @@ def test_sample_pipeline_on_march_2019_pdf(tmp_path: Path) -> None:
         pytest.skip("March 2019 sample PDFs are not available on this machine.")
 
     config = AppConfig()
-    config.output.images_dir = tmp_path / "images"
-    config.output.json_dir = tmp_path / "json"
-    config.output.csv_dir = tmp_path / "csv"
-    config.output.review_dir = tmp_path / "review"
+    _configure_test_output(config, tmp_path)
     config.ocr.enabled = False
 
     result = process_sample(SAMPLE_QP, config, mark_scheme_pdf=SAMPLE_MS)
 
     assert result.records
     assert result.json_path.exists()
-    assert result.csv_path.exists()
-    assert result.review_path.exists()
-    assert any(Path(record.screenshot_path).exists() or (tmp_path / Path(record.screenshot_path)).exists() for record in result.records)
+    assert result.output_root == tmp_path / "output"
+    assert any(
+        Path(record.screenshot_path).exists() or ((tmp_path / "output") / Path(record.screenshot_path)).exists()
+        for record in result.records
+    )
     assert all(record.combined_question_text for record in result.records)
 
 
@@ -68,10 +71,7 @@ def test_repo_march_2019_pipeline_exports_whole_questions_with_matched_mark_sche
         pytest.skip("Repo March 2019 sample PDFs are not available.")
 
     config = AppConfig()
-    config.output.images_dir = tmp_path / "images"
-    config.output.json_dir = tmp_path / "json"
-    config.output.csv_dir = tmp_path / "csv"
-    config.output.review_dir = tmp_path / "review"
+    _configure_test_output(config, tmp_path)
     config.ocr.enabled = False
 
     result = process_sample(REPO_SAMPLE_QP, config, mark_scheme_pdf=REPO_SAMPLE_MS)
@@ -92,10 +92,7 @@ def test_repo_pipeline_does_not_pass_scope_mismatches_on_newer_papers(tmp_path: 
         pytest.skip("Repo newer-format sample PDFs are not available.")
 
     config = AppConfig()
-    config.output.images_dir = tmp_path / "images"
-    config.output.json_dir = tmp_path / "json"
-    config.output.csv_dir = tmp_path / "csv"
-    config.output.review_dir = tmp_path / "review"
+    _configure_test_output(config, tmp_path)
     config.ocr.enabled = False
 
     s24 = process_sample(REPO_S24_P3_QP, config, mark_scheme_pdf=REPO_S24_P3_MS)
@@ -117,10 +114,7 @@ def test_repo_s24_p3_recovers_hidden_middle_parts_on_question_side(tmp_path: Pat
         pytest.skip("Repo Spring 2024 P3 sample PDFs are not available.")
 
     config = AppConfig()
-    config.output.images_dir = tmp_path / "images"
-    config.output.json_dir = tmp_path / "json"
-    config.output.csv_dir = tmp_path / "csv"
-    config.output.review_dir = tmp_path / "review"
+    _configure_test_output(config, tmp_path)
     config.ocr.enabled = False
 
     result = process_sample(REPO_S24_P3_QP, config, mark_scheme_pdf=REPO_S24_P3_MS)
@@ -142,10 +136,7 @@ def test_repo_n25_p53_does_not_false_pass_incomplete_question_scope(tmp_path: Pa
         pytest.skip("Repo November 2025 P53 sample PDFs are not available.")
 
     config = AppConfig()
-    config.output.images_dir = tmp_path / "images"
-    config.output.json_dir = tmp_path / "json"
-    config.output.csv_dir = tmp_path / "csv"
-    config.output.review_dir = tmp_path / "review"
+    _configure_test_output(config, tmp_path)
     config.ocr.enabled = False
 
     result = process_sample(REPO_N25_P5_QP, config, mark_scheme_pdf=REPO_N25_P5_MS)
@@ -174,10 +165,7 @@ def test_repo_n23_p41_q1_keeps_full_mark_scheme_block_and_total(tmp_path: Path) 
         pytest.skip("Repo November 2023 P41 sample PDFs are not available.")
 
     config = AppConfig()
-    config.output.images_dir = tmp_path / "images"
-    config.output.json_dir = tmp_path / "json"
-    config.output.csv_dir = tmp_path / "csv"
-    config.output.review_dir = tmp_path / "review"
+    _configure_test_output(config, tmp_path)
     config.ocr.enabled = False
 
     result = process_sample(REPO_N23_P41_QP, config, mark_scheme_pdf=REPO_N23_P41_MS)
@@ -198,10 +186,7 @@ def test_repo_j24_p5_and_p6_q1_pick_up_page_5_mark_scheme_start(tmp_path: Path) 
         pytest.skip("Repo June 2024 P5/P6 sample PDFs are not available.")
 
     config = AppConfig()
-    config.output.images_dir = tmp_path / "images"
-    config.output.json_dir = tmp_path / "json"
-    config.output.csv_dir = tmp_path / "csv"
-    config.output.review_dir = tmp_path / "review"
+    _configure_test_output(config, tmp_path)
     config.ocr.enabled = False
 
     p51 = process_sample(REPO_J24_P51_QP, config, mark_scheme_pdf=REPO_J24_P51_MS)
@@ -225,10 +210,7 @@ def test_repo_newer_format_scope_cleanup_recovers_question_side_parts_before_tot
         pytest.skip("Repo November 2025 sample PDFs are not available.")
 
     config = AppConfig()
-    config.output.images_dir = tmp_path / "images"
-    config.output.json_dir = tmp_path / "json"
-    config.output.csv_dir = tmp_path / "csv"
-    config.output.review_dir = tmp_path / "review"
+    _configure_test_output(config, tmp_path)
 
     p51 = process_sample(REPO_N25_P51_QP, config, mark_scheme_pdf=REPO_N25_P51_MS)
     p53 = process_sample(REPO_N25_P5_QP, config, mark_scheme_pdf=REPO_N25_P5_MS)
@@ -259,10 +241,7 @@ def test_repo_j24_p13_q3_starts_at_real_prompt_not_answer_space_junk(tmp_path: P
         pytest.skip("Repo June 2024 P13 sample PDFs are not available.")
 
     config = AppConfig()
-    config.output.images_dir = tmp_path / "images"
-    config.output.json_dir = tmp_path / "json"
-    config.output.csv_dir = tmp_path / "csv"
-    config.output.review_dir = tmp_path / "review"
+    _configure_test_output(config, tmp_path)
     config.ocr.enabled = False
 
     result = process_sample(REPO_J24_P13_QP, config, mark_scheme_pdf=REPO_J24_P13_MS)
@@ -283,10 +262,7 @@ def test_repo_n25_p55_q4_recovers_full_whole_question_scope(tmp_path: Path) -> N
         pytest.skip("Repo November 2025 P55 sample PDFs are not available.")
 
     config = AppConfig()
-    config.output.images_dir = tmp_path / "images"
-    config.output.json_dir = tmp_path / "json"
-    config.output.csv_dir = tmp_path / "csv"
-    config.output.review_dir = tmp_path / "review"
+    _configure_test_output(config, tmp_path)
     config.ocr.enabled = False
 
     result = process_sample(REPO_N25_P55_QP, config, mark_scheme_pdf=REPO_N25_P55_MS)
@@ -306,10 +282,7 @@ def test_repo_mark_scheme_subpart_totals_fix_j22_p52_q6(tmp_path: Path) -> None:
         pytest.skip("Repo June 2022 P52 sample PDFs are not available.")
 
     config = AppConfig()
-    config.output.images_dir = tmp_path / "images"
-    config.output.json_dir = tmp_path / "json"
-    config.output.csv_dir = tmp_path / "csv"
-    config.output.review_dir = tmp_path / "review"
+    _configure_test_output(config, tmp_path)
     config.ocr.enabled = False
 
     result = process_sample(REPO_J22_P52_QP, config, mark_scheme_pdf=REPO_J22_P52_MS)
@@ -331,10 +304,7 @@ def test_repo_mark_scheme_no_subparts_fix_j21_p42_q6(tmp_path: Path) -> None:
         pytest.skip("Repo June 2021 P42 sample PDFs are not available.")
 
     config = AppConfig()
-    config.output.images_dir = tmp_path / "images"
-    config.output.json_dir = tmp_path / "json"
-    config.output.csv_dir = tmp_path / "csv"
-    config.output.review_dir = tmp_path / "review"
+    _configure_test_output(config, tmp_path)
     config.ocr.enabled = False
 
     result = process_sample(REPO_J21_P42_QP, config, mark_scheme_pdf=REPO_J21_P42_MS)

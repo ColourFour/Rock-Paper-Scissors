@@ -9,6 +9,7 @@ from .config import AppConfig
 from .image_limits import cap_image_pixels, render_pdf_area
 from .models import BoundingBox, PageLayout, QuestionSpan, RenderResult, TextBlock
 from .mupdf_tools import quiet_mupdf
+from .output_layout import question_image_output_path
 from .question_detection import detect_question_anchor_candidates, extract_text_from_blocks, parse_question_start
 
 
@@ -1291,15 +1292,7 @@ def _stitch_images(images: list["Image.Image"], gap_px: int) -> "Image.Image":
 
 
 def _image_output_path(span: QuestionSpan, config: AppConfig) -> Path:
-    if span.question_number.isdigit():
-        filename = config.naming.image_template.format(
-            paper_name=span.paper_name,
-            question_number=int(span.question_number),
-            question_number_raw=span.question_number,
-        )
-    else:
-        filename = f"{span.paper_name}_q{span.question_number}.png"
-    return config.output.images_dir / filename
+    return question_image_output_path(span.source_pdf, span.question_number, config)
 
 
 def _crop_diagnostics(

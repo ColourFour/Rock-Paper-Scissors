@@ -1,123 +1,14 @@
+# Runtime taxonomy and product direction live in src/exam_bank/runtime_profile.json.
+# Keep this YAML for operational overrides only.
+
 input:
   question_papers_dir: input/question_papers
   mark_schemes_dir: input/mark_schemes
   mappings_dir: input/mappings
-  examiner_reports_dir: input/examiner_reports
 
 output:
-  images_dir: output/images
   json_dir: output/json
-  csv_dir: output/csv
-  review_dir: output/review
   debug_dir: output/debug
-
-paper_families:
-  - P1
-  - P2
-  - P3
-  - P4
-  - P5
-  - P6
-  - unknown
-
-paper_family_taxonomy:
-  P1:
-    quadratics: [general]
-    polynomials: [general]
-    partial_fractions: [general]
-    modulus: [general]
-    inequalities: [general]
-    functions: [general]
-    coordinate_geometry: [general]
-    circular_measure: [general]
-    trigonometry: [general]
-    binomial_expansion: [general]
-    differentiation: [general]
-    integration: [general]
-    numerical_methods: [general]
-  P2:
-    logarithmic_and_exponential_functions: [general]
-    trigonometry: [general]
-    differentiation: [general]
-    integration: [general]
-  P3:
-    logarithmic_and_exponential_functions: [general]
-    trigonometry: [general]
-    integration: [general]
-    differentiation: [general]
-    differential_equations: [general]
-    vectors: [general]
-    complex_numbers: [general]
-    series: [general]
-    parametric_equations: [general]
-  P4:
-    kinematics: [general]
-    forces_and_equilibrium: [general]
-    connected_particles: [general]
-    momentum_and_impulse: [general]
-    work_energy_power: [general]
-    circular_motion: [general]
-  P5:
-    permutations_and_combinations: [general]
-    probability: [general]
-    discrete_random_variables: [general]
-    binomial_distribution: [general]
-    poisson_distribution: [general]
-    normal_distribution: [general]
-    correlation_and_regression: [general]
-  P6:
-    probability: [general]
-    continuous_random_variables: [general]
-    normal_distribution: [general]
-    central_limit_theorem: [general]
-    confidence_intervals: [general]
-    hypothesis_testing: [general]
-  unknown: {}
-
-# Optional overrides. These are deep-merged with built-in method/object/keyword hints.
-classification_hints: {}
-
-difficulty_labels:
-  - easy
-  - average
-  - difficult
-
-difficulty_heuristics:
-  P1:
-    routine_easy_topics: [quadratics, differentiation, integration]
-    difficult_topics: [numerical_methods, modulus, binomial_expansion]
-    linked_keywords: [hence, deduce, using your answer]
-    disguised_keywords: [show that, prove, given that]
-  P2:
-    routine_easy_topics: [differentiation, integration]
-    difficult_topics: [numerical_methods, logarithmic_and_exponential_functions]
-    linked_keywords: [hence, deduce, using your answer]
-    disguised_keywords: [show that, prove, given that]
-  P3:
-    routine_easy_topics: [logarithmic_and_exponential_functions]
-    difficult_topics: [complex_numbers, vectors, differential_equations, integration]
-    linked_keywords: [hence, deduce, using your answer]
-    disguised_keywords: [show that, prove, given that, locus]
-  P4:
-    routine_easy_topics: [kinematics]
-    difficult_topics: [connected_particles, forces_and_equilibrium, momentum_and_impulse, circular_motion]
-    linked_keywords: [hence, therefore, subsequently]
-    disguised_keywords: [model, limiting, coefficient of restitution]
-  P5:
-    routine_easy_topics: []
-    difficult_topics: [probability, correlation_and_regression]
-    linked_keywords: [given that, conditional, interpret]
-    disguised_keywords: [justify, comment, in context]
-  P6:
-    routine_easy_topics: []
-    difficult_topics: [continuous_random_variables, confidence_intervals, hypothesis_testing, central_limit_theorem]
-    linked_keywords: [given that, conditional, interpret]
-    disguised_keywords: [justify, comment, in context]
-  unknown:
-    routine_easy_topics: []
-    difficult_topics: []
-    linked_keywords: [hence, deduce, given that]
-    disguised_keywords: [show that, prove]
 
 detection:
   max_question_number: 30
@@ -153,51 +44,13 @@ ocr:
   min_confidence: 45
 
 naming:
-  image_template: "{paper_name}_q{question_number:02d}.png"
-  json_name: "question_bank.json"
-  csv_name: "question_bank.csv"
-  review_name: "review_items.csv"
+  json_name: question_bank.json
 
 classification:
   enable_openai: false
   openai_model: gpt-5-mini
   openai_timeout_seconds: 30
   uncertainty_threshold: 0.55
-
-topic_pdfs:
-  enable_topic_pdfs: true
-  topic_pdf_output_dir: output/topic_pdfs
-  embed_mark_schemes: true
-  page_size: A4
-  margin: 42
-  image_max_width: 500
-  caption_font_size: 8
-  section_heading_font_size: 15
-  topic_title_font_size: 22
-
-practice_page:
-  publish_enabled: true
-  publish_dir: practice
-  publish_assets: true
-  publish_asset_dir: assets
-  github_pages_url: "https://colourfour.github.io/Rock-Paper-Scissors/"
-  bug_report:
-    enabled: true
-    form_url: ""
-    open_in_new_tab: true
-    enable_copy_button: true
-    form_field_names:
-      paper: paper
-      topic: topic
-      question_number: question_number
-      marks: marks
-      source_pdf: source_pdf
-      question_image: question_image
-      markscheme_image: markscheme_image
-      report_text: report_text
-
-manual_review:
-  output_dir: output/manual_review
 
 debug:
   enabled: false
