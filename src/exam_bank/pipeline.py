@@ -4,13 +4,15 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import re
+from typing import Any
 
-from .classification import classify_question, classify_question_parts, infer_source_paper_code
+from .classification import classify_question, classify_question_parts, infer_source_paper_code, _explicit_primary_topic_from_text
 from .config import AppConfig
 from .document_metadata import DocumentMetadata, parse_filename_metadata, parse_internal_document_metadata, reconcile_document_metadata
 from .document_registry import DocumentRegistry, build_document_registry, build_document_registry_from_paths
 from .examiner_reports import examiner_report_topic_evidence
 from .exporters import export_records
+from .extraction_structure import build_structured_question_text
 from .image_rendering import render_question_image
 from .mark_schemes import MarkSchemeImageResult, extract_mark_scheme_answers, find_mark_scheme, render_mark_scheme_images
 from .models import ClassificationResult, PageLayout, QuestionRecord, QuestionSpan
@@ -125,7 +127,8 @@ def build_records_for_pdf(
     source_paper_code = document_metadata.component or source_paper_code
     for span in spans:
         render_result = render_question_image(question_pdf, span, layouts, config)
-        question_text = render_result.extracted_text or span.combined_text
+        structured_text = build_structured_question_text(span, layouts, config)
+        question_text = structured_text.combined_question_text or render_result.extracted_text or span.combined_text
         marks = extract_marks_from_text(question_text)
         answer_text = answers.get(span.question_number, "")
         mark_scheme_image = mark_scheme_images.get(span.question_number)
@@ -145,6 +148,7 @@ def build_records_for_pdf(
                 marks=marks,
                 answer_text=answer_text,
                 render_result=render_result,
+                structured_text=structured_text,
                 mark_scheme_image=mark_scheme_image,
                 mark_scheme_flags=mark_scheme_flags,
                 matched_mark_scheme=matched_mark_scheme,
@@ -156,6 +160,7 @@ def build_records_for_pdf(
                 examiner_text=examiner_text,
             )
         )
+    _reconcile_paper_topics(records, config)
     _write_pdf_diagnostic(question_pdf, layouts, spans, records, config)
     _write_topic_debug_report(question_pdf, records, config)
     return records
@@ -169,6 +174,7 @@ def _build_question_record(
     marks: int | None,
     answer_text: str,
     render_result,
+    structured_text,
     mark_scheme_image: MarkSchemeImageResult | None,
     mark_scheme_flags: list[str],
     matched_mark_scheme: Path | None,
@@ -201,21 +207,26 @@ def _build_question_record(
             question_text,
             marks,
             config,
-            context_flags=flags,
+            context_flags=flags + list(structured_text.extraction_quality_flags),
             source_name=question_pdf.name,
             examiner_report_text=examiner_text,
             mark_scheme_text=answer_text,
             question_ocr_text=question_text if "ocr_question_text" in flags else "",
+            body_text_normalized=structured_text.body_text_normalized,
+            part_texts=structured_text.part_texts,
+            body_text_raw=structured_text.body_text_raw,
+            math_lines=structured_text.math_lines,
         )
         part_level_topics = classify_question_parts(
             question_text,
             span.question_number,
             config,
-            context_flags=flags,
+            context_flags=flags + list(structured_text.extraction_quality_flags),
             source_name=question_pdf.name,
             examiner_report_text=examiner_text,
             mark_scheme_text=answer_text,
             question_ocr_text=question_text if "ocr_question_text" in flags else "",
+            structured_part_texts=structured_text.part_texts,
         )
         question_topic = _question_topic_from_parts(classification, part_level_topics)
         qa_flags = _record_qa_flags(str(question_topic["paper_family"]), str(question_topic["topic"]), config, mark_scheme_image)
@@ -231,6 +242,13 @@ def _build_question_record(
                 full_question_label=span.full_question_label,
                 screenshot_path=_display_path(render_result.screenshot_path),
                 combined_question_text=question_text,
+                body_text_raw=structured_text.body_text_raw,
+                body_text_normalized=structured_text.body_text_normalized,
+                math_lines=structured_text.math_lines,
+                diagram_text=structured_text.diagram_text,
+                extraction_quality_score=structured_text.extraction_quality_score,
+                extraction_quality_flags=structured_text.extraction_quality_flags,
+                part_texts=structured_text.part_texts,
                 answer_text=answer_text,
                 paper_family=str(question_topic["paper_family"]),
                 source_paper_code=source_paper_code,
@@ -354,7 +372,18 @@ def _question_topic_from_parts(
     part_level_topics: list[dict[str, object]],
 ) -> dict[str, object]:
     review_flags = list(classification.review_flags)
-    secondary_topics: list[str] = []
+    part_topics = []
+    for part in part_level_topics:
+        part_topic = str(part.get("topic", ""))
+        if not part_topic or part_topic == classification.topic:
+            continue
+        if bool(part.get("topic_uncertain")) or str(part.get("topic_confidence", "")) == "low":
+            continue
+        part_topics.append(part_topic)
+    secondary_topics = []
+    for topic in part_topics:
+        if topic not in secondary_topics:
+            secondary_topics.append(topic)
     topic_confidence = classification.topic_confidence
     topic_uncertain = classification.topic_uncertain
     confidence = classification.confidence
@@ -378,6 +407,11 @@ def _question_topic_from_parts(
 
     if any(part.get("topic_uncertain") or part.get("topic_confidence") == "low" for part in part_level_topics):
         review_flags.append("part_topic_uncertain")
+    if secondary_topics:
+        review_flags.append("mixed_topic_possible")
+    if len(secondary_topics) >= 2 and classification.topic_confidence != "high":
+        review_flags.append("topic_uncertain_mixed_major_topics")
+        topic_uncertain = True
 
     return {
         "paper_family": paper_family,
@@ -410,6 +444,414 @@ def _clear_resolved_mixed_topic_flags(flags: list[str]) -> list[str]:
 
 def _topic_uncertain_from_flags(flags: list[str]) -> bool:
     return "topic_uncertain" in flags or any(flag.startswith("topic_uncertain_") for flag in flags)
+
+
+def _reconcile_paper_topics(records: list[QuestionRecord], config: AppConfig) -> None:
+    if not records:
+        return
+    paper_family = records[0].paper_family
+    if paper_family not in {"P1", "P3", "P4", "P5"}:
+        return
+
+    allowed_topics = set(config.paper_family_taxonomy.get(paper_family, {}))
+    coverage = _paper_topic_coverage_summary(records, allowed_topics)
+    missing_topics = sorted(topic for topic, counts in coverage.items() if counts["high"] == 0 and counts["medium"] == 0)
+
+    for record in records:
+        candidate_topics = _candidate_topics_for_reconciliation(record, allowed_topics)
+        if not _record_is_reconciliation_candidate(record, candidate_topics):
+            record.paper_repair_considered = False
+            record.paper_repair_changed_topic = False
+            record.paper_repair_candidates = []
+            record.paper_repair_missing_topics = missing_topics
+            record.paper_repair_reason = ""
+            record.paper_repair_note = _paper_repair_note(missing_topics, changed=False, considered=False)
+            record.paper_repair_supporting_evidence = {}
+            continue
+
+        record.paper_repair_considered = True
+        record.paper_repair_candidates = candidate_topics
+        record.paper_repair_missing_topics = missing_topics
+        if len(candidate_topics) <= 1:
+            record.paper_repair_changed_topic = False
+            record.paper_repair_reason = ""
+            record.paper_repair_note = _paper_repair_note(missing_topics, changed=False, considered=True)
+            record.paper_repair_supporting_evidence = {
+                "paper_family": paper_family,
+                "coverage_summary": coverage,
+                "eligible_for_repair": True,
+                "candidate_topics": candidate_topics,
+                "decision": "insufficient_local_alternatives",
+            }
+            continue
+
+        current_scores = _reconciliation_topic_scores(record, record.topic, paper_family, missing_topics, coverage)
+        best_topic = record.topic
+        best_scores = current_scores
+        all_scores = [current_scores]
+        for topic in candidate_topics:
+            scores = _reconciliation_topic_scores(record, topic, paper_family, missing_topics, coverage)
+            all_scores.append(scores)
+            if _is_better_reconciliation_candidate(scores, best_scores):
+                best_topic = topic
+                best_scores = scores
+
+        record.paper_repair_supporting_evidence = {
+            "paper_family": paper_family,
+            "coverage_summary": coverage,
+            "missing_topics": missing_topics,
+            "eligible_for_repair": True,
+            "candidate_topics": candidate_topics,
+            "current_topic_scores": current_scores,
+            "repair_candidate_scores": {item["topic"]: item for item in all_scores},
+            "selected_topic": best_topic,
+        }
+
+        if best_topic == record.topic:
+            record.reconciliation_changed_topic = False
+            record.reconciliation_reason = ""
+            record.reconciliation_note = _reconciliation_note(record, missing_topics, changed=False)
+            record.paper_repair_changed_topic = False
+            record.paper_repair_reason = ""
+            record.paper_repair_note = _paper_repair_note(missing_topics, changed=False, considered=True)
+            record.paper_repair_from_topic = record.topic
+            record.paper_repair_to_topic = record.topic
+            continue
+
+        previous_topic = record.topic
+        record.topic = best_topic
+        record.question_level_topic = best_topic
+        record.subtopic = "general"
+        record.question_level_subtopic = "general"
+        record.topic_confidence = "medium" if best_scores["local_support"] >= 3 else "low"
+        record.topic_uncertain = record.topic_confidence == "low"
+        record.confidence = min(0.72, max(record.confidence, 0.58)) if record.topic_confidence == "medium" else min(record.confidence, 0.5)
+        record.review_flags = _update_reconciliation_flags(record.review_flags, record.topic_uncertain)
+        record.topic_alternatives = [f"{paper_family}:{previous_topic}:general"] if previous_topic != best_topic else record.topic_alternatives[:1]
+        record.secondary_topics = [previous_topic] if previous_topic != best_topic and previous_topic in allowed_topics else []
+        record.reconciliation_changed_topic = True
+        record.reconciliation_reason = (
+            f"paper-level reconciliation reranked `{previous_topic}` to `{best_topic}` because `{best_topic}` "
+            f"had genuine local support and better fit missing paper coverage"
+        )
+        record.reconciliation_note = _reconciliation_note(record, missing_topics, changed=True)
+        record.paper_repair_changed_topic = True
+        record.paper_repair_reason = (
+            f"paper-level fallback repair reranked `{previous_topic}` to `{best_topic}` because the local label was weak "
+            f"and `{best_topic}` had stronger local plausibility plus better missing-topic fit"
+        )
+        record.paper_repair_note = _paper_repair_note(missing_topics, changed=True, considered=True)
+        record.paper_repair_from_topic = previous_topic
+        record.paper_repair_to_topic = best_topic
+
+
+def _record_is_reconciliation_candidate(record: QuestionRecord, candidate_topics: list[str]) -> bool:
+    trigger_flags = {
+        "low_classification_confidence",
+        "topic_forced_no_rule_match",
+        "topic_forced_low_confidence",
+        "mixed_topic_possible",
+        "weak_question_text",
+        "weak_markscheme_signal",
+        "likely_needs_visual_review",
+        "part_topic_continuity_applied",
+        "object_cue_conflict_with_method_scoring",
+    }
+    details = record.topic_evidence_details or {}
+    score_breakdown = details.get("topic_score_breakdown", {})
+    current_breakdown = score_breakdown.get(record.topic, {})
+    clear_local_win = _score_gap_is_clear_winner(record.topic, score_breakdown)
+    extraction_weak = record.extraction_quality_score < 0.68 or "likely_needs_visual_review" in record.extraction_quality_flags
+    meaningful_alternatives = [topic for topic in candidate_topics if topic and topic != record.topic]
+    has_meaningful_alternative = bool(meaningful_alternatives)
+    weak_signal = bool(
+        record.topic_confidence != "high"
+        or record.topic_uncertain
+        or any(flag in trigger_flags for flag in record.review_flags)
+        or any("uncertain" in flag for flag in record.review_flags)
+        or bool(details.get("object_cue_conflict_with_method_scoring"))
+        or bool(current_breakdown.get("object_protection_penalty"))
+        or (
+            extraction_weak
+            and (
+                record.topic_confidence != "high"
+                or record.topic_uncertain
+                or bool(details.get("object_cue_conflict_with_method_scoring"))
+                or len(meaningful_alternatives) > 0
+                or bool(record.secondary_topics)
+                or _has_meaningful_part_tension(record)
+                or _score_breakdown_is_close(record.topic, score_breakdown)
+            )
+        )
+    )
+
+    if _is_protected_local_win(record, candidate_topics):
+        return False
+
+    if not weak_signal:
+        return False
+    if not has_meaningful_alternative:
+        return False
+    return True
+
+
+def _candidate_topics_for_reconciliation(record: QuestionRecord, allowed_topics: set[str]) -> list[str]:
+    candidates: list[str] = []
+    if record.topic in allowed_topics:
+        candidates.append(record.topic)
+    for topic in _topics_from_alternatives(record.topic_alternatives):
+        if topic in allowed_topics and topic not in candidates:
+            candidates.append(topic)
+    for part in record.part_level_topics:
+        topic = str(part.get("topic", ""))
+        if topic in allowed_topics and str(part.get("topic_confidence", "")) in {"medium", "high"} and topic not in candidates:
+            candidates.append(topic)
+    details = record.topic_evidence_details or {}
+    object_topic = str(details.get("object_cue_primary_topic", ""))
+    if object_topic in allowed_topics and object_topic not in candidates:
+        candidates.append(object_topic)
+    for topic in record.secondary_topics:
+        if topic in allowed_topics and topic not in candidates:
+            candidates.append(topic)
+    for topic in _close_runner_up_topics(details.get("topic_score_breakdown", {}), record.topic):
+        if topic in allowed_topics and topic not in candidates:
+            candidates.append(topic)
+    return candidates[:5]
+
+
+def _topics_from_alternatives(alternatives: list[str]) -> list[str]:
+    topics: list[str] = []
+    for label in alternatives:
+        parts = str(label).split(":")
+        if len(parts) >= 2 and parts[1] and parts[1] not in topics:
+            topics.append(parts[1])
+    return topics
+
+
+def _reconciliation_topic_scores(
+    record: QuestionRecord,
+    topic: str,
+    paper_family: str,
+    missing_topics: list[str],
+    coverage: dict[str, dict[str, int]],
+) -> dict[str, float]:
+    question_text = (record.body_text_normalized or record.combined_question_text).lower()
+    markscheme_text = record.answer_text.lower()
+    details = record.topic_evidence_details or {}
+    object_scores = details.get("object_cue_topic_scores", {})
+    object_primary = str(details.get("object_cue_primary_topic", ""))
+    score_breakdown = details.get("topic_score_breakdown", {})
+    current_breakdown = score_breakdown.get(record.topic, {})
+    candidate_breakdown = score_breakdown.get(topic, {})
+    explicit_question = 1.0 if _explicit_primary_topic_from_text(question_text, paper_family) == topic else 0.0
+    explicit_markscheme = 1.0 if markscheme_text and _explicit_primary_topic_from_text(markscheme_text, paper_family) == topic else 0.0
+    part_support = sum(
+        1.0
+        for part in record.part_level_topics
+        if str(part.get("topic", "")) == topic and str(part.get("topic_confidence", "")) in {"medium", "high"}
+    )
+    alternative_support = 1.0 if topic in _topics_from_alternatives(record.topic_alternatives) else 0.0
+    current_bonus = 0.8 if topic == record.topic else 0.0
+    object_support = min(3.0, float(object_scores.get(topic, 0.0)) / 6.0)
+    object_alignment = 1.5 if object_primary == topic and topic != record.topic else 0.0
+    secondary_support = 0.8 if topic in record.secondary_topics else 0.0
+    close_runner_bonus = _close_score_bonus(current_breakdown, candidate_breakdown, topic != record.topic)
+    extraction_bonus = 1.2 if (record.extraction_quality_score < 0.68 or "likely_needs_visual_review" in record.extraction_quality_flags) else 0.0
+    drift_bonus = 1.2 if _looks_like_incidental_algebra_drift(record, topic) else 0.0
+    paper_fit = _paper_repair_bonus(topic, missing_topics, coverage)
+    local_support = (
+        explicit_question * 3.0
+        + explicit_markscheme * 1.8
+        + part_support * 1.4
+        + alternative_support
+        + current_bonus
+        + object_support
+        + object_alignment
+        + secondary_support
+        + close_runner_bonus
+    )
+    repair_bonus = paper_fit + extraction_bonus + drift_bonus
+    return {
+        "topic": topic,
+        "local_support": local_support,
+        "paper_fit": paper_fit,
+        "repair_bonus": repair_bonus,
+        "total": local_support + repair_bonus,
+        "explicit_question": explicit_question,
+        "explicit_markscheme": explicit_markscheme,
+        "object_support": object_support,
+        "object_alignment": object_alignment,
+        "close_runner_bonus": close_runner_bonus,
+        "extraction_bonus": extraction_bonus,
+        "drift_bonus": drift_bonus,
+        "current_final_score": float(current_breakdown.get("final_score", 0.0)),
+        "candidate_final_score": float(candidate_breakdown.get("final_score", 0.0)),
+    }
+
+
+def _is_better_reconciliation_candidate(candidate: dict[str, float], current: dict[str, float]) -> bool:
+    if candidate["topic"] == current["topic"]:
+        return False
+    if candidate["local_support"] < 2.6:
+        return False
+    if candidate["repair_bonus"] < 0.9:
+        return False
+    if candidate["total"] < current["total"] + 1.25:
+        return False
+    if candidate["local_support"] + 0.5 < current["local_support"]:
+        return False
+    return True
+
+
+def _update_reconciliation_flags(flags: list[str], topic_uncertain: bool) -> list[str]:
+    cleaned = [
+        flag
+        for flag in flags
+        if flag not in {"mixed_topic_possible", "topic_forced_no_rule_match", "topic_forced_low_confidence"}
+    ]
+    cleaned.append("paper_level_topic_reconciled")
+    if not topic_uncertain:
+        cleaned = [flag for flag in cleaned if flag != "low_classification_confidence"]
+    return sorted(set(cleaned))
+
+
+def _reconciliation_note(record: QuestionRecord, missing_topics: list[str], changed: bool) -> str:
+    if changed:
+        return f"soft paper-level coverage prior considered missing topics {missing_topics} and reranked this weak label"
+    if missing_topics:
+        return f"soft paper-level coverage prior considered missing topics {missing_topics} but local evidence remained stronger"
+    return "soft paper-level coverage prior found no meaningful missing-topic repair"
+
+
+def _paper_repair_note(missing_topics: list[str], changed: bool, considered: bool) -> str:
+    if not considered:
+        return "paper-level fallback repair did not consider this question because the local label was protected"
+    if changed:
+        return f"paper-level fallback repair used missing-topic pressure from {missing_topics} to rerank a weak label"
+    if missing_topics:
+        return f"paper-level fallback repair considered missing topics {missing_topics} but did not find enough local support"
+    return "paper-level fallback repair found no underrepresented topics worth using"
+
+
+def _paper_topic_coverage_summary(records: list[QuestionRecord], allowed_topics: set[str]) -> dict[str, dict[str, int]]:
+    coverage = {topic: {"high": 0, "medium": 0, "weak": 0} for topic in sorted(allowed_topics)}
+    for record in records:
+        topic = record.topic
+        if topic not in coverage:
+            continue
+        bucket = "weak"
+        if record.topic_confidence == "high" and not record.topic_uncertain:
+            bucket = "high"
+        elif record.topic_confidence == "medium" and not record.topic_uncertain:
+            bucket = "medium"
+        coverage[topic][bucket] += 1
+    return coverage
+
+
+def _close_runner_up_topics(score_breakdown: dict[str, dict[str, Any]], current_topic: str) -> list[str]:
+    current_score = float(score_breakdown.get(current_topic, {}).get("final_score", 0.0))
+    close_topics: list[str] = []
+    for topic, details in sorted(score_breakdown.items(), key=lambda item: float(item[1].get("final_score", 0.0)), reverse=True):
+        if topic == current_topic:
+            continue
+        score = float(details.get("final_score", 0.0))
+        if current_score and current_score - score > 6.5:
+            continue
+        if score <= 0:
+            continue
+        close_topics.append(topic)
+        if len(close_topics) >= 2:
+            break
+    return close_topics
+
+
+def _score_gap_is_clear_winner(current_topic: str, score_breakdown: dict[str, dict[str, Any]]) -> bool:
+    if current_topic not in score_breakdown:
+        return False
+    ordered = sorted((float(details.get("final_score", 0.0)), topic) for topic, details in score_breakdown.items())
+    if len(ordered) < 2:
+        return True
+    top_score, top_topic = ordered[-1]
+    runner_up_score = ordered[-2][0]
+    return top_topic == current_topic and top_score - runner_up_score >= 8.0
+
+
+def _score_breakdown_is_close(current_topic: str, score_breakdown: dict[str, dict[str, Any]]) -> bool:
+    if current_topic not in score_breakdown or len(score_breakdown) < 2:
+        return False
+    ordered = sorted((float(details.get("final_score", 0.0)), topic) for topic, details in score_breakdown.items())
+    top_score, top_topic = ordered[-1]
+    runner_up_score = ordered[-2][0]
+    return top_topic == current_topic and top_score - runner_up_score <= 6.5
+
+
+def _has_meaningful_part_tension(record: QuestionRecord) -> bool:
+    for part in record.part_level_topics:
+        part_topic = str(part.get("topic", ""))
+        if not part_topic or part_topic == record.topic:
+            continue
+        if str(part.get("topic_confidence", "")) in {"medium", "high"} and not bool(part.get("topic_uncertain")):
+            return True
+    return False
+
+
+def _is_protected_local_win(record: QuestionRecord, candidate_topics: list[str]) -> bool:
+    details = record.topic_evidence_details or {}
+    score_breakdown = details.get("topic_score_breakdown", {})
+    object_primary = str(details.get("object_cue_primary_topic", ""))
+    object_scores = details.get("object_cue_topic_scores", {})
+    has_object_conflict = bool(details.get("object_cue_conflict_with_method_scoring"))
+    meaningful_alternatives = [topic for topic in candidate_topics if topic and topic != record.topic]
+    strong_object_anchor = object_primary == record.topic and float(object_scores.get(record.topic, 0.0)) >= 8.0
+    clear_local_win = _score_gap_is_clear_winner(record.topic, score_breakdown)
+    no_part_tension = not _has_meaningful_part_tension(record)
+    return bool(
+        record.topic_confidence == "high"
+        and not record.topic_uncertain
+        and strong_object_anchor
+        and clear_local_win
+        and not has_object_conflict
+        and not meaningful_alternatives
+        and no_part_tension
+    )
+
+
+def _close_score_bonus(
+    current_breakdown: dict[str, Any],
+    candidate_breakdown: dict[str, Any],
+    is_alternative: bool,
+) -> float:
+    if not is_alternative:
+        return 0.0
+    current_score = float(current_breakdown.get("final_score", 0.0))
+    candidate_score = float(candidate_breakdown.get("final_score", 0.0))
+    if candidate_score <= 0:
+        return 0.0
+    gap = current_score - candidate_score
+    if gap <= 3.0:
+        return 1.4
+    if gap <= 7.0:
+        return 0.8
+    return 0.0
+
+
+def _paper_repair_bonus(topic: str, missing_topics: list[str], coverage: dict[str, dict[str, int]]) -> float:
+    if topic in missing_topics:
+        return 1.5
+    counts = coverage.get(topic, {})
+    if counts and counts.get("high", 0) == 0 and counts.get("medium", 0) == 0 and counts.get("weak", 0) > 0:
+        return 0.7
+    return 0.0
+
+
+def _looks_like_incidental_algebra_drift(record: QuestionRecord, alternative_topic: str) -> bool:
+    details = record.topic_evidence_details or {}
+    object_primary = str(details.get("object_cue_primary_topic", ""))
+    if record.topic not in {"algebra", "quadratics", "polynomials"}:
+        return False
+    if alternative_topic != object_primary:
+        return False
+    return float(details.get("object_cue_topic_scores", {}).get(alternative_topic, 0.0)) >= 6.0
 
 
 def _display_path(path: Path) -> str:
@@ -529,13 +971,21 @@ def _flag_counts(records: list[QuestionRecord]) -> dict[str, int]:
 def _write_topic_debug_report(question_pdf: Path, records: list[QuestionRecord], config: AppConfig) -> Path:
     config.ensure_output_dirs()
     paper_name = _safe_basename(question_pdf.stem)
+    allowed_topics = set(config.paper_family_taxonomy.get(records[0].paper_family, {})) if records else set()
     payload = {
         "source_pdf": _display_path(question_pdf),
         "paper_name": paper_name,
+        "paper_repair_summary": _paper_repair_debug_summary(records, allowed_topics),
         "questions": [
             {
                 "question_number": record.question_number,
                 "text_snippet": record.combined_question_text[:500],
+                "body_text_raw": record.body_text_raw[:500],
+                "body_text_normalized": record.body_text_normalized[:500],
+                "math_lines": record.math_lines,
+                "diagram_text": record.diagram_text,
+                "extraction_quality_score": record.extraction_quality_score,
+                "extraction_quality_flags": record.extraction_quality_flags,
                 "paper_family": record.paper_family,
                 "source_paper_family": record.source_paper_family,
                 "inferred_paper_family": record.inferred_paper_family,
@@ -549,6 +999,21 @@ def _write_topic_debug_report(question_pdf: Path, records: list[QuestionRecord],
                 "record_confidence": record.confidence,
                 "topic_uncertain": record.topic_uncertain,
                 "topic_evidence": record.topic_evidence,
+                "detected_object_cues": record.topic_evidence_details.get("detected_object_cues", []),
+                "object_cue_topic_scores": record.topic_evidence_details.get("object_cue_topic_scores", {}),
+                "object_cue_source_topic_scores": record.topic_evidence_details.get("object_cue_source_topic_scores", {}),
+                "object_cue_primary_topic": record.topic_evidence_details.get("object_cue_primary_topic", ""),
+                "object_cue_conflict_with_method_scoring": record.topic_evidence_details.get(
+                    "object_cue_conflict_with_method_scoring", False
+                ),
+                "object_cue_protection_applied": record.topic_evidence_details.get("object_cue_protection_applied", False),
+                "object_cue_protection_topics": record.topic_evidence_details.get("object_cue_protection_topics", []),
+                "object_cue_resisted_override": record.topic_evidence_details.get("object_cue_resisted_override", False),
+                "source_method_stage_top_topic": record.topic_evidence_details.get("source_method_stage_top_topic", ""),
+                "source_method_stage_top_score": record.topic_evidence_details.get("source_method_stage_top_score", 0),
+                "object_cue_override_stage": record.topic_evidence_details.get("object_cue_override_stage", ""),
+                "object_cue_override_topic": record.topic_evidence_details.get("object_cue_override_topic", ""),
+                "topic_score_breakdown": record.topic_evidence_details.get("topic_score_breakdown", {}),
                 "secondary_topics": record.secondary_topics,
                 "part_level_topics": record.part_level_topics,
                 "alternative_candidate_topics": record.topic_alternatives if record.topic_confidence != "high" else [],
@@ -556,6 +1021,18 @@ def _write_topic_debug_report(question_pdf: Path, records: list[QuestionRecord],
                 "difficulty_confidence": record.difficulty_confidence,
                 "difficulty_evidence": record.difficulty_evidence,
                 "difficulty_uncertain": record.difficulty_uncertain,
+                "reconciliation_changed_topic": record.reconciliation_changed_topic,
+                "reconciliation_reason": record.reconciliation_reason,
+                "reconciliation_note": record.reconciliation_note,
+                "paper_repair_considered": record.paper_repair_considered,
+                "paper_repair_changed_topic": record.paper_repair_changed_topic,
+                "paper_repair_reason": record.paper_repair_reason,
+                "paper_repair_note": record.paper_repair_note,
+                "paper_repair_from_topic": record.paper_repair_from_topic,
+                "paper_repair_to_topic": record.paper_repair_to_topic,
+                "paper_repair_candidates": record.paper_repair_candidates,
+                "paper_repair_missing_topics": record.paper_repair_missing_topics,
+                "paper_repair_supporting_evidence": record.paper_repair_supporting_evidence,
                 "markscheme_image_found": bool(record.markscheme_image),
                 "markscheme_question_number": record.markscheme_question_number,
                 "markscheme_crop_confidence": record.markscheme_crop_confidence,
@@ -569,3 +1046,19 @@ def _write_topic_debug_report(question_pdf: Path, records: list[QuestionRecord],
     path = config.output.review_dir / f"{paper_name}_topic_debug.json"
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return path
+
+
+def _paper_repair_debug_summary(records: list[QuestionRecord], allowed_topics: set[str]) -> dict[str, Any]:
+    if not records:
+        return {}
+    coverage = _paper_topic_coverage_summary(records, allowed_topics)
+    missing_topics = sorted(topic for topic, counts in coverage.items() if counts["high"] == 0 and counts["medium"] == 0)
+    eligible_questions = [record.question_number for record in records if record.paper_repair_considered]
+    changed_questions = [record.question_number for record in records if record.paper_repair_changed_topic]
+    return {
+        "paper_family": records[0].paper_family,
+        "topic_coverage_summary": coverage,
+        "missing_or_underrepresented_topics": missing_topics,
+        "repair_eligible_questions": eligible_questions,
+        "repair_changed_questions": changed_questions,
+    }

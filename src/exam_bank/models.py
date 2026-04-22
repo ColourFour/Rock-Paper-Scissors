@@ -133,6 +133,13 @@ class QuestionRecord:
     full_question_label: str
     screenshot_path: str
     combined_question_text: str
+    body_text_raw: str
+    body_text_normalized: str
+    math_lines: list[str]
+    diagram_text: list[str]
+    extraction_quality_score: float
+    extraction_quality_flags: list[str]
+    part_texts: list[dict[str, Any]]
     answer_text: str
     paper_family: str
     source_paper_family: str
@@ -191,6 +198,18 @@ class QuestionRecord:
     markscheme_failure_reason: str = ""
     qa_status: str = "pass"
     qa_flags: list[str] = field(default_factory=list)
+    reconciliation_changed_topic: bool = False
+    reconciliation_reason: str = ""
+    reconciliation_note: str = ""
+    paper_repair_considered: bool = False
+    paper_repair_changed_topic: bool = False
+    paper_repair_reason: str = ""
+    paper_repair_note: str = ""
+    paper_repair_from_topic: str = ""
+    paper_repair_to_topic: str = ""
+    paper_repair_candidates: list[str] = field(default_factory=list)
+    paper_repair_missing_topics: list[str] = field(default_factory=list)
+    paper_repair_supporting_evidence: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         question_level_paper_family = self.question_level_paper_family or self.paper_family
@@ -206,6 +225,13 @@ class QuestionRecord:
             "question_crop_confidence": self.question_crop_confidence or ("low" if self.crop_uncertain else "high"),
             "screenshot_path": self.screenshot_path,
             "combined_question_text": self.combined_question_text,
+            "body_text_raw": self.body_text_raw,
+            "body_text_normalized": self.body_text_normalized,
+            "math_lines": self.math_lines,
+            "diagram_text": self.diagram_text,
+            "extraction_quality_score": round(self.extraction_quality_score, 3),
+            "extraction_quality_flags": self.extraction_quality_flags,
+            "part_texts": self.part_texts,
             "answer_text": self.answer_text,
             "paper_family": question_level_paper_family,
             "source_paper_code": self.source_paper_code,
@@ -236,6 +262,18 @@ class QuestionRecord:
             "difficulty_confidence": self.difficulty_confidence,
             "difficulty_evidence": self.difficulty_evidence,
             "difficulty_uncertain": self.difficulty_uncertain,
+            "reconciliation_changed_topic": self.reconciliation_changed_topic,
+            "reconciliation_reason": self.reconciliation_reason,
+            "reconciliation_note": self.reconciliation_note,
+            "paper_repair_considered": self.paper_repair_considered,
+            "paper_repair_changed_topic": self.paper_repair_changed_topic,
+            "paper_repair_reason": self.paper_repair_reason,
+            "paper_repair_note": self.paper_repair_note,
+            "paper_repair_from_topic": self.paper_repair_from_topic,
+            "paper_repair_to_topic": self.paper_repair_to_topic,
+            "paper_repair_candidates": self.paper_repair_candidates,
+            "paper_repair_missing_topics": self.paper_repair_missing_topics,
+            "paper_repair_supporting_evidence": self.paper_repair_supporting_evidence,
             "marks": self.marks,
             "marks_if_available": self.marks_if_available,
             "page_numbers": self.page_numbers,

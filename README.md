@@ -542,15 +542,15 @@ unknown
 Each paper family has one strict allowed topic list in `config.yaml`, such as:
 
 ```text
-P1: quadratics, polynomials, partial_fractions, modulus, inequalities, functions, coordinate_geometry, circular_measure, trigonometry, binomial_expansion, differentiation, integration, numerical_methods
+P1: algebra, quadratics, functions, coordinate_geometry, circular_measure, trigonometry, series_and_sequences, differentiation, integration, binomial_expansion
 P2: logarithmic_and_exponential_functions, trigonometry, differentiation, integration
-P3: logarithmic_and_exponential_functions, trigonometry, integration, differentiation, differential_equations, vectors, complex_numbers, series, parametric_equations
-P4: kinematics, forces_and_equilibrium, connected_particles, momentum_and_impulse, work_energy_power, circular_motion
-P5: permutations_and_combinations, probability, discrete_random_variables, binomial_distribution, poisson_distribution, normal_distribution, correlation_and_regression
+P3: algebra, modulus, logarithms_and_exponentials, trigonometry, functions, numerical_methods, differentiation, integration, differential_equations, binomial_expansion, parametric_equations, implicit_differentiation, partial_fractions, vectors, complex_numbers, polynomials
+P4: kinematics_constant_acceleration, kinematics_graphs, kinematics_variable_functions, forces_newtons_second_law, equilibrium_coplanar_forces, equilibrium_particle, friction_rough_plane, connected_particles, work_energy_power, momentum_impulse, connected_particles_energy, rough_plane_energy, power_and_resistance
+P5: data_representation, measures_of_central_tendency_and_dispersion, permutations_and_combinations, probability, probability_distributions, geometric_distribution, binomial_distribution, normal_distribution
 P6: probability, continuous_random_variables, normal_distribution, central_limit_theorem, confidence_intervals, hypothesis_testing
 ```
 
-The classifier first chooses the paper family, restricts candidates to that paper's allowed list, scores each topic, and then forces exactly one final `topic`. Confidence is diagnostic only; it never suppresses the final assignment. `secondary_topics` is intentionally left empty in this strict baseline.
+The classifier first chooses the paper family, restricts candidates to that paper's allowed list, scores each topic, and then forces exactly one final `topic`. Confidence is diagnostic only; it never suppresses the final assignment. When a grouped or blended question genuinely mixes methods, the pipeline now also records `secondary_topics` and adds review flags instead of pretending the match is clean.
 
 For grouped multi-part questions, the default exported `topic` is the single final grouped topic used by the student page. `part_level_topics` may still be written for diagnostics, but it does not change the forced one-topic output.
 

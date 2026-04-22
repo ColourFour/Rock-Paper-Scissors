@@ -9,19 +9,16 @@ PAPER_FAMILIES = ["P1", "P2", "P3", "P4", "P5", "P6", "unknown"]
 
 DEFAULT_PAPER_FAMILY_TAXONOMY = {
     "P1": {
+        "algebra": ["general"],
         "quadratics": ["general"],
-        "polynomials": ["general"],
-        "partial_fractions": ["general"],
-        "modulus": ["general"],
-        "inequalities": ["general"],
         "functions": ["general"],
         "coordinate_geometry": ["general"],
         "circular_measure": ["general"],
         "trigonometry": ["general"],
+        "series_and_sequences": ["general"],
         "binomial_expansion": ["general"],
         "differentiation": ["general"],
         "integration": ["general"],
-        "numerical_methods": ["general"],
     },
     "P2": {
         "logarithmic_and_exponential_functions": ["general"],
@@ -30,32 +27,47 @@ DEFAULT_PAPER_FAMILY_TAXONOMY = {
         "integration": ["general"],
     },
     "P3": {
-        "logarithmic_and_exponential_functions": ["general"],
+        "algebra": ["general"],
+        "modulus": ["general"],
+        "logarithms_and_exponentials": ["general"],
+        "functions": ["general"],
+        "numerical_methods": ["general"],
         "trigonometry": ["general"],
         "integration": ["general"],
         "differentiation": ["general"],
         "differential_equations": ["general"],
+        "binomial_expansion": ["general"],
+        "implicit_differentiation": ["general"],
+        "partial_fractions": ["general"],
         "vectors": ["general"],
         "complex_numbers": ["general"],
-        "series": ["general"],
+        "polynomials": ["general"],
         "parametric_equations": ["general"],
     },
     "P4": {
-        "kinematics": ["general"],
-        "forces_and_equilibrium": ["general"],
+        "kinematics_constant_acceleration": ["general"],
+        "kinematics_graphs": ["general"],
+        "kinematics_variable_functions": ["general"],
+        "forces_newtons_second_law": ["general"],
+        "equilibrium_coplanar_forces": ["general"],
+        "equilibrium_particle": ["general"],
+        "friction_rough_plane": ["general"],
         "connected_particles": ["general"],
-        "momentum_and_impulse": ["general"],
+        "momentum_impulse": ["general"],
         "work_energy_power": ["general"],
-        "circular_motion": ["general"],
+        "connected_particles_energy": ["general"],
+        "rough_plane_energy": ["general"],
+        "power_and_resistance": ["general"],
     },
     "P5": {
+        "data_representation": ["general"],
+        "measures_of_central_tendency_and_dispersion": ["general"],
         "permutations_and_combinations": ["general"],
         "probability": ["general"],
-        "discrete_random_variables": ["general"],
+        "probability_distributions": ["general"],
+        "geometric_distribution": ["general"],
         "binomial_distribution": ["general"],
-        "poisson_distribution": ["general"],
         "normal_distribution": ["general"],
-        "correlation_and_regression": ["general"],
     },
     "P6": {
         "probability": ["general"],
@@ -592,60 +604,35 @@ CAIE_9709_HINTS = {
 # note bank, but this is the structure consumed by classification.py.
 CAIE_CLASSIFICATION_HINTS = {
     "P1": {
+        "algebra": {
+            "general": {"methods": ["simplify", "solve", "factorise", "express"], "objects": ["algebraic expression", "equation"], "keywords": ["surd", "rearrange", "substitute"]},
+        },
         "quadratics": {
-            "solving": {"methods": ["solve", "factorise", "complete the square"], "objects": ["quadratic equation", "quadratic"], "keywords": ["discriminant", "roots"]},
-            "discriminant": {"methods": ["find", "show"], "objects": ["discriminant"], "keywords": ["real roots", "equal roots"]},
-        },
-        "polynomials": {
-            "factor_theorem": {"methods": ["factor theorem", "show"], "objects": ["polynomial"], "keywords": ["factor"]},
-            "remainder_theorem": {"methods": ["remainder theorem", "find"], "objects": ["polynomial"], "keywords": ["remainder"]},
-            "division": {"methods": ["divide"], "objects": ["polynomial"], "keywords": ["quotient"]},
-        },
-        "partial_fractions": {
-            "decomposition": {"methods": ["partial fractions", "express.*partial fractions"], "objects": ["rational function", "proper fraction"], "keywords": ["denominator", "numerator"]},
-        },
-        "modulus": {
-            "equations": {"methods": ["solve"], "objects": ["modulus"], "keywords": ["|x|", "absolute value"]},
-            "inequalities": {"methods": ["solve"], "objects": ["modulus inequality"], "keywords": ["|x|", "<", ">"]},
-            "graphs": {"methods": ["sketch"], "objects": ["modulus graph"], "keywords": ["|x|"]},
+            "general": {"methods": ["solve", "find", "show"], "objects": ["quadratic", "quadratic equation", "discriminant"], "keywords": ["roots", "equal roots", "real roots", "intersection"]},
         },
         "functions": {
-            "composite_functions": {"methods": ["find", "show"], "objects": ["composite function"], "keywords": ["fg", "gf", "f(g", "g(f"]},
-            "inverse_functions": {"methods": ["find"], "objects": ["inverse function"], "keywords": ["inverse", "f^{-1}"]},
-            "transformations": {"methods": ["sketch", "describe"], "objects": ["transformation"], "keywords": ["translation", "stretch", "reflection"]},
-            "domain_range": {"methods": ["state", "find"], "objects": ["domain", "range"], "keywords": ["one-one"]},
+            "general": {"methods": ["find", "show", "state", "describe", "sketch"], "objects": ["function", "composite function", "inverse function", "domain", "range", "transformation"], "keywords": ["f(g", "g(f", "inverse", "domain", "range", "translation", "stretch", "reflection"]},
         },
         "coordinate_geometry": {
-            "straight_line": {"methods": ["find the equation", "show"], "objects": ["straight line", "gradient"], "keywords": ["perpendicular", "parallel"]},
-            "circles": {"methods": ["find the equation", "show"], "objects": ["circle", "radius", "centre"], "keywords": ["diameter", "tangent"]},
+            "general": {"methods": ["find the equation", "show", "find"], "objects": ["straight line", "circle", "gradient", "centre", "radius"], "keywords": ["perpendicular", "parallel", "intersection", "diameter", "midpoint"]},
         },
         "circular_measure": {
-            "radians": {"methods": ["find", "calculate"], "objects": ["radian", "angle"], "keywords": ["theta"]},
-            "arc_length_sector_area": {"methods": ["find", "calculate"], "objects": ["arc", "sector"], "keywords": ["arc length", "sector area"]},
+            "general": {"methods": ["find", "calculate"], "objects": ["radian", "arc", "sector", "segment"], "keywords": ["theta", "arc length", "sector area"]},
         },
         "trigonometry": {
-            "trig_equations": {"methods": ["solve"], "objects": ["trigonometric equation"], "keywords": ["sin", "cos", "tan"]},
-            "trig_identities": {"methods": ["prove", "show"], "objects": ["identity"], "keywords": ["sin", "cos", "tan"]},
-            "trig_graphs": {"methods": ["sketch", "draw"], "objects": ["trig graph"], "keywords": ["period", "amplitude"]},
+            "general": {"methods": ["solve", "prove", "show", "sketch"], "objects": ["trigonometric equation", "identity", "trig graph"], "keywords": ["sin", "cos", "tan", "period", "amplitude"]},
+        },
+        "series_and_sequences": {
+            "general": {"methods": ["find", "calculate", "show"], "objects": ["sequence", "series", "arithmetic progression", "geometric progression"], "keywords": ["AP", "GP", "sum to infinity", "common difference", "common ratio"]},
         },
         "binomial_expansion": {
-            "positive_integer": {"methods": ["expand"], "objects": ["binomial"], "keywords": ["ascending powers", "positive integer"]},
-            "fractional_negative": {"methods": ["expand", "approximate"], "objects": ["negative power", "fractional power"], "keywords": ["ascending powers", "valid for"]},
-            "approximation": {"methods": ["approximate", "estimate"], "objects": ["binomial expansion"], "keywords": ["valid for"]},
+            "general": {"methods": ["expand", "approximate", "find"], "objects": ["binomial", "binomial expansion", "coefficient"], "keywords": ["ascending powers", "valid for", "coefficient", "term independent of x"]},
         },
         "differentiation": {
-            "standard_differentiation": {"methods": ["differentiate", "find dy/dx"], "objects": ["derivative"], "keywords": ["gradient"]},
-            "tangents_normals": {"methods": ["find the equation"], "objects": ["tangent", "normal"], "keywords": ["gradient"]},
-            "stationary_points": {"methods": ["find", "determine"], "objects": ["stationary point"], "keywords": ["maximum", "minimum"]},
+            "general": {"methods": ["differentiate", "find dy/dx", "find the equation"], "objects": ["derivative", "gradient", "stationary point", "tangent", "normal"], "keywords": ["dy/dx", "maximum", "minimum"]},
         },
         "integration": {
-            "standard_integration": {"methods": ["integrate", "find the integral"], "objects": ["integral"], "keywords": ["constant of integration"]},
-            "definite_integration": {"methods": ["evaluate", "integrate"], "objects": ["definite integral"], "keywords": ["limits"]},
-            "area_under_curve": {"methods": ["find the area", "calculate the area"], "objects": ["curve"], "keywords": ["area under"]},
-        },
-        "numerical_methods": {
-            "iteration": {"methods": ["iterate", "iteration"], "objects": ["recurrence"], "keywords": ["x_n", "x_{n+1}"]},
-            "estimation_of_roots": {"methods": ["estimate", "find"], "objects": ["root"], "keywords": ["change of sign"]},
+            "general": {"methods": ["integrate", "evaluate", "find the area", "calculate the area"], "objects": ["integral", "definite integral", "curve", "volume"], "keywords": ["constant of integration", "limits", "area under", "volume of revolution"]},
         },
     },
     "P2": {
@@ -668,116 +655,120 @@ CAIE_CLASSIFICATION_HINTS = {
         },
     },
     "P3": {
-        "partial_fractions": {
-            "decomposition": {"methods": ["partial fractions", "express.*partial fractions"], "objects": ["rational function"], "keywords": ["denominator", "numerator"]},
+        "algebra": {
+            "general": {"methods": ["simplify", "solve", "express"], "objects": ["equation", "expression"], "keywords": ["algebraic", "substitute", "rearrange"]},
         },
-        "logarithmic_and_exponential_functions": {
-            "log_laws": {"methods": ["simplify", "show"], "objects": ["logarithm"], "keywords": ["log", "ln"]},
-            "exponential_equations": {"methods": ["solve"], "objects": ["exponential equation"], "keywords": ["e^", "exp"]},
-            "logarithmic_equations": {"methods": ["solve"], "objects": ["logarithmic equation"], "keywords": ["log", "ln"]},
+        "modulus": {
+            "general": {"methods": ["solve", "sketch"], "objects": ["modulus", "absolute value"], "keywords": ["|x|", "|z|"]},
+        },
+        "logarithms_and_exponentials": {
+            "general": {"methods": ["solve", "show", "simplify"], "objects": ["logarithm", "exponential equation"], "keywords": ["log", "ln", "e^", "exponential"]},
         },
         "trigonometry": {
-            "trig_substitutions": {"methods": ["substitution"], "objects": ["trigonometric"], "keywords": ["sec", "cosec", "cot"]},
-            "trig_equations": {"methods": ["solve"], "objects": ["trigonometric equation"], "keywords": ["sin", "cos", "tan"]},
-            "identities": {"methods": ["prove", "show"], "objects": ["identity"], "keywords": ["sec", "cosec", "cot"]},
+            "general": {"methods": ["solve", "show", "prove"], "objects": ["trigonometric equation", "identity"], "keywords": ["sin", "cos", "tan", "sec", "cosec", "cot"]},
         },
-        "integration_by_parts": {
-            "product_integrals": {"methods": ["integration by parts", "integrate"], "objects": ["x sec", "x sin", "x cos", "x e", "product requiring parts"], "keywords": ["sec^2", "ln"]},
+        "functions": {
+            "general": {"methods": ["find", "show", "state", "sketch"], "objects": ["function", "composite function", "inverse function", "domain", "range"], "keywords": ["composite", "inverse", "domain", "range"]},
         },
-        "integration_by_substitution": {
-            "substitution": {"methods": ["substitution", "using the substitution"], "objects": ["integral"], "keywords": ["u ="]},
+        "numerical_methods": {
+            "general": {"methods": ["iterate", "estimate"], "objects": ["iterative formula", "root"], "keywords": ["x_n", "x_{n+1}", "newton", "change of sign", "fixed point"]},
         },
-        "partial_fractions_integration": {
-            "rational_integrals": {"methods": ["integrate"], "objects": ["partial fractions", "rational function"], "keywords": ["denominator"]},
+        "differentiation": {
+            "general": {"methods": ["differentiate", "find the equation"], "objects": ["derivative", "stationary point", "tangent", "normal"], "keywords": ["dy/dx", "maximum", "minimum"]},
         },
         "differential_equations": {
-            "separable": {"methods": ["separate variables", "solve"], "objects": ["differential equation"], "keywords": ["dy/dx"]},
-            "first_order_modelling": {"methods": ["model", "form", "solve"], "objects": ["differential equation"], "keywords": ["rate of change"]},
+            "general": {"methods": ["solve", "separate variables", "form"], "objects": ["differential equation"], "keywords": ["dy/dx", "rate of change"]},
         },
-        "vectors": {
-            "vector_geometry": {"methods": ["prove", "show", "find"], "objects": ["vector"], "keywords": ["parallel", "perpendicular"]},
-            "lines_vectors": {"methods": ["find", "show"], "objects": ["vector equation", "line"], "keywords": ["scalar product"]},
+        "integration": {
+            "general": {"methods": ["integrate", "evaluate", "find the area"], "objects": ["integral", "definite integral"], "keywords": ["by parts", "substitution", "limits", "area"]},
         },
-        "complex_numbers": {
-            "argand_diagrams": {"methods": ["sketch", "represent"], "objects": ["argand diagram"], "keywords": ["complex"]},
-            "modulus_argument": {"methods": ["find", "calculate"], "objects": ["modulus", "argument"], "keywords": ["arg", "|z|"]},
-            "roots_of_complex_numbers": {"methods": ["solve", "find the roots"], "objects": ["complex roots"], "keywords": ["z"]},
-        },
-        "maclaurin_series": {
-            "standard_series": {"methods": ["expand", "find"], "objects": ["maclaurin series"], "keywords": ["powers of x"]},
-            "approximations": {"methods": ["approximate"], "objects": ["maclaurin series"], "keywords": ["powers of x"]},
+        "binomial_expansion": {
+            "general": {"methods": ["expand", "approximate"], "objects": ["binomial", "coefficient"], "keywords": ["ascending powers", "valid for", "coefficient"]},
         },
         "parametric_equations": {
-            "differentiation": {"methods": ["differentiate", "find dy/dx"], "objects": ["parametric"], "keywords": ["dx/dt", "dy/dt"]},
-            "integration": {"methods": ["integrate"], "objects": ["parametric"], "keywords": ["dx/dt"]},
+            "general": {"methods": ["find dy/dx", "differentiate", "integrate"], "objects": ["parametric"], "keywords": ["x =", "y =", "dx/dt", "dy/dt", "parameter"]},
         },
         "implicit_differentiation": {
-            "implicit_curves": {"methods": ["differentiate", "find dy/dx"], "objects": ["implicit"], "keywords": ["implicitly"]},
+            "general": {"methods": ["differentiate", "find dy/dx"], "objects": ["implicit relation"], "keywords": ["implicitly", "implicit"]},
+        },
+        "partial_fractions": {
+            "general": {"methods": ["partial fractions", "express"], "objects": ["rational function"], "keywords": ["denominator", "numerator"]},
+        },
+        "vectors": {
+            "general": {"methods": ["prove", "show", "find"], "objects": ["vector", "position vector", "vector equation"], "keywords": ["parallel", "perpendicular", "scalar product"]},
+        },
+        "complex_numbers": {
+            "general": {"methods": ["sketch", "represent", "find", "solve"], "objects": ["complex number", "argand diagram", "modulus", "argument"], "keywords": ["argand", "|z|", "arg z", "complex roots", "locus"]},
+        },
+        "polynomials": {
+            "general": {"methods": ["find", "show", "factorise"], "objects": ["polynomial"], "keywords": ["factor theorem", "remainder theorem", "remainder", "quotient"]},
         },
     },
     "P4": {
-        "kinematics": {
-            "constant_acceleration": {"methods": ["find", "calculate"], "objects": ["constant acceleration"], "keywords": ["suvat"]},
-            "displacement_velocity_acceleration": {"methods": ["differentiate", "integrate", "find"], "objects": ["displacement", "velocity", "acceleration"], "keywords": ["particle"]},
-            "velocity_time_graphs": {"methods": ["sketch", "find"], "objects": ["velocity-time graph"], "keywords": ["area under"]},
+        "kinematics_constant_acceleration": {
+            "general": {"methods": ["find", "calculate"], "objects": ["constant acceleration"], "keywords": ["u", "v", "a", "s", "t", "suvat"]},
         },
-        "forces_and_equilibrium": {
-            "resolving_forces": {"methods": ["resolve", "find"], "objects": ["force"], "keywords": ["component"]},
-            "friction": {"methods": ["find", "calculate"], "objects": ["friction"], "keywords": ["coefficient of friction"]},
-            "limiting_equilibrium": {"methods": ["find", "calculate"], "objects": ["limiting equilibrium"], "keywords": ["about to move"]},
+        "kinematics_graphs": {
+            "general": {"methods": ["find", "calculate", "sketch"], "objects": ["velocity-time graph", "speed-time graph", "displacement-time graph"], "keywords": ["area under", "gradient"]},
+        },
+        "kinematics_variable_functions": {
+            "general": {"methods": ["differentiate", "integrate", "find"], "objects": ["velocity", "acceleration", "displacement"], "keywords": ["v(t)", "a(t)", "s(t)", "particle moves so that"]},
+        },
+        "forces_newtons_second_law": {
+            "general": {"methods": ["resolve", "find", "calculate"], "objects": ["force", "newton's second law"], "keywords": ["ma", "particle", "acceleration"]},
+        },
+        "equilibrium_coplanar_forces": {
+            "general": {"methods": ["resolve", "find", "calculate"], "objects": ["coplanar forces", "equilibrium"], "keywords": ["three forces", "angles", "resultant"]},
+        },
+        "equilibrium_particle": {
+            "general": {"methods": ["resolve", "find", "calculate"], "objects": ["particle in equilibrium"], "keywords": ["equilibrium", "particle"]},
+        },
+        "friction_rough_plane": {
+            "general": {"methods": ["find", "calculate", "resolve"], "objects": ["rough plane", "friction"], "keywords": ["coefficient of friction", "limiting equilibrium", "about to move", "rough plane"]},
         },
         "connected_particles": {
-            "strings": {"methods": ["find", "calculate"], "objects": ["connected particles", "string"], "keywords": ["tension", "pulley"]},
-            "pulleys": {"methods": ["find", "calculate"], "objects": ["pulley"], "keywords": ["tension"]},
-            "tension": {"methods": ["find", "calculate"], "objects": ["tension"], "keywords": ["string", "pulley"]},
-        },
-        "friction": {
-            "coefficient_of_friction": {"methods": ["find", "calculate"], "objects": ["friction"], "keywords": ["coefficient of friction"]},
-            "limiting_friction": {"methods": ["find"], "objects": ["limiting friction"], "keywords": ["about to move"]},
-        },
-        "momentum": {
-            "impulse": {"methods": ["find", "calculate"], "objects": ["impulse"], "keywords": ["momentum"]},
-            "collisions": {"methods": ["find", "calculate"], "objects": ["collision"], "keywords": ["coefficient of restitution"]},
-        },
-        "collisions": {
-            "conservation_of_momentum": {"methods": ["find", "calculate"], "objects": ["collision"], "keywords": ["momentum"]},
-            "coefficient_of_restitution": {"methods": ["find", "calculate"], "objects": ["coefficient of restitution"], "keywords": ["collision"]},
+            "general": {"methods": ["find", "calculate"], "objects": ["connected particles", "string", "pulley", "tension"], "keywords": ["tension", "pulley"]},
         },
         "work_energy_power": {
-            "work": {"methods": ["find", "calculate"], "objects": ["work"], "keywords": ["force times distance"]},
-            "kinetic_potential_energy": {"methods": ["find", "calculate"], "objects": ["kinetic energy", "potential energy"], "keywords": ["energy"]},
-            "power": {"methods": ["find", "calculate"], "objects": ["power"], "keywords": ["rate of working"]},
+            "general": {"methods": ["find", "calculate", "use conservation of energy"], "objects": ["work", "kinetic energy", "potential energy", "power"], "keywords": ["energy", "work done", "loss of gravitational potential energy"]},
         },
-        "circular_motion": {
-            "centripetal_force": {"methods": ["find", "calculate"], "objects": ["centripetal force"], "keywords": ["circular motion"]},
+        "momentum_impulse": {
+            "general": {"methods": ["find", "calculate"], "objects": ["momentum", "impulse", "collision"], "keywords": ["coefficient of restitution", "impact", "impulse"]},
         },
-        "variable_force": {
-            "differential_equation_modelling": {"methods": ["form", "solve"], "objects": ["variable force", "differential equation"], "keywords": ["resistance"]},
+        "connected_particles_energy": {
+            "general": {"methods": ["find", "calculate", "use conservation of energy"], "objects": ["connected particles", "energy"], "keywords": ["pulley", "tension", "kinetic energy", "potential energy"]},
+        },
+        "rough_plane_energy": {
+            "general": {"methods": ["find", "calculate", "use conservation of energy"], "objects": ["rough plane", "energy"], "keywords": ["friction", "work done against friction", "kinetic energy"]},
+        },
+        "power_and_resistance": {
+            "general": {"methods": ["find", "calculate"], "objects": ["power", "resistance"], "keywords": ["engine power", "resistance", "speed"]},
         },
     },
     "P5": {
+        "data_representation": {
+            "general": {"methods": ["draw", "complete", "interpret"], "objects": ["histogram", "box plot", "cumulative frequency graph", "stem-and-leaf"], "keywords": ["quartile", "median", "frequency density"]},
+        },
+        "measures_of_central_tendency_and_dispersion": {
+            "general": {"methods": ["find", "calculate", "estimate"], "objects": ["mean", "variance", "standard deviation", "interquartile range"], "keywords": ["coding", "combined mean", "combined standard deviation", "quartile", "IQR"]},
+        },
+        "permutations_and_combinations": {
+            "general": {"methods": ["find", "calculate"], "objects": ["arrangement", "selection", "committee"], "keywords": ["arrangements", "different ways", "letters", "digits", "committee", "choose"]},
+        },
         "probability": {
-            "basic_probability": {"methods": ["find", "calculate"], "objects": ["probability"], "keywords": ["P("]},
-            "conditional_probability": {"methods": ["find", "calculate"], "objects": ["conditional probability"], "keywords": ["given that"]},
-            "independent_events": {"methods": ["show", "find"], "objects": ["independent events"], "keywords": ["independent"]},
-            "tree_diagrams": {"methods": ["draw", "use"], "objects": ["tree diagram"], "keywords": ["branch"]},
+            "general": {"methods": ["find", "calculate", "draw", "use"], "objects": ["probability", "conditional probability", "tree diagram"], "keywords": ["P(", "given that", "independent", "tree diagram"]},
+        },
+        "probability_distributions": {
+            "general": {"methods": ["find", "calculate"], "objects": ["probability distribution", "random variable"], "keywords": ["probability distribution table", "E(X)", "Var(X)", "P(X=x)"]},
+        },
+        "geometric_distribution": {
+            "general": {"methods": ["find", "calculate"], "objects": ["geometric distribution"], "keywords": ["first success", "until the first", "geometric distribution"]},
         },
         "binomial_distribution": {
-            "direct_binomial": {"methods": ["find", "calculate"], "objects": ["binomial distribution"], "keywords": ["X ~ B", "Bin"]},
-            "cumulative_binomial": {"methods": ["find", "calculate"], "objects": ["binomial distribution"], "keywords": ["at most", "at least"]},
-        },
-        "poisson_distribution": {
-            "direct_poisson": {"methods": ["find", "calculate"], "objects": ["poisson distribution"], "keywords": ["Poisson"]},
-            "poisson_modelling": {"methods": ["model", "find"], "objects": ["poisson distribution"], "keywords": ["mean rate"]},
+            "general": {"methods": ["find", "calculate"], "objects": ["binomial distribution"], "keywords": ["X ~ B", "Bin", "binomial distribution", "n trials"]},
         },
         "normal_distribution": {
-            "standardisation": {"methods": ["find", "calculate"], "objects": ["normal distribution"], "keywords": ["standardise", "standard deviation"]},
-            "inverse_normal": {"methods": ["find"], "objects": ["normal distribution"], "keywords": ["inverse normal", "percentage point"]},
-        },
-        "correlation_and_regression": {
-            "product_moment_correlation": {"methods": ["find", "calculate"], "objects": ["correlation"], "keywords": ["product moment"]},
-            "least_squares_regression": {"methods": ["find", "calculate"], "objects": ["regression line"], "keywords": ["least squares"]},
-            "interpretation": {"methods": ["interpret", "comment"], "objects": ["correlation", "regression"], "keywords": ["context"]},
+            "general": {"methods": ["find", "calculate"], "objects": ["normal distribution"], "keywords": ["normal distribution", "standard deviation", "z", "standardise", "percentage point"]},
         },
     },
     "P6": {
@@ -810,8 +801,8 @@ DIFFICULTY_LABELS = ["easy", "average", "difficult"]
 
 DEFAULT_DIFFICULTY_HEURISTICS = {
     "P1": {
-        "routine_easy_topics": ["quadratics", "differentiation", "integration"],
-        "difficult_topics": ["numerical_methods", "modulus", "binomial_expansion"],
+        "routine_easy_topics": ["quadratics", "functions", "differentiation"],
+        "difficult_topics": ["binomial_expansion", "integration", "series_and_sequences"],
         "linked_keywords": ["hence", "deduce", "using your answer"],
         "disguised_keywords": ["show that", "prove", "given that"],
     },
@@ -822,20 +813,20 @@ DEFAULT_DIFFICULTY_HEURISTICS = {
         "disguised_keywords": ["show that", "prove", "given that"],
     },
     "P3": {
-        "routine_easy_topics": ["logarithmic_and_exponential_functions"],
-        "difficult_topics": ["complex_numbers", "vectors", "differential_equations", "integration"],
+        "routine_easy_topics": ["logarithms_and_exponentials"],
+        "difficult_topics": ["complex_numbers", "vectors", "differential_equations", "implicit_differentiation", "partial_fractions"],
         "linked_keywords": ["hence", "deduce", "using your answer"],
         "disguised_keywords": ["show that", "prove", "given that", "locus"],
     },
     "P4": {
-        "routine_easy_topics": ["kinematics"],
-        "difficult_topics": ["connected_particles", "forces_and_equilibrium", "momentum_and_impulse", "circular_motion"],
+        "routine_easy_topics": ["kinematics_constant_acceleration"],
+        "difficult_topics": ["connected_particles", "connected_particles_energy", "momentum_impulse", "rough_plane_energy", "power_and_resistance"],
         "linked_keywords": ["hence", "therefore", "subsequently"],
         "disguised_keywords": ["model", "limiting", "coefficient of restitution"],
     },
     "P5": {
-        "routine_easy_topics": [],
-        "difficult_topics": ["probability", "correlation_and_regression"],
+        "routine_easy_topics": ["data_representation"],
+        "difficult_topics": ["probability", "probability_distributions", "normal_distribution", "geometric_distribution"],
         "linked_keywords": ["given that", "conditional", "interpret"],
         "disguised_keywords": ["justify", "comment", "in context"],
     },
