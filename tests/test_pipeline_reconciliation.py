@@ -1,6 +1,15 @@
 from exam_bank.config import AppConfig
 from exam_bank.models import QuestionRecord
-from exam_bank.pipeline import _reconcile_paper_topics
+from exam_bank.pipeline import (
+    _assess_text_fidelity,
+    _derive_scope_quality_status,
+    _derive_topic_trust_status,
+    _paper_total_check,
+    _polluted_pass_signal_groups,
+    _reconcile_paper_topics,
+    _refine_validation_status,
+    _should_trigger_paper_total_rescan,
+)
 
 
 def _record(
@@ -447,3 +456,188 @@ def test_corrupted_text_needs_local_support_for_repair() -> None:
     assert records[0].topic == "algebra"
     assert records[0].paper_repair_considered is False
     assert records[0].paper_repair_changed_topic is False
+
+
+def test_refine_validation_status_escalates_low_confidence_polluted_pass() -> None:
+    status, flags = _refine_validation_status(
+        base_status="review",
+        base_validation_flags=[],
+        mapping_status="pass",
+        mapping_failure_reason="",
+        crop_uncertain=True,
+        extraction_quality_flags=["likely_needs_visual_review", "broken_fraction_structure"],
+        review_flags=["low_confidence_question_crop", "weak_question_text"],
+        question_structure_detected={"contamination_indicators": {"signal_score": 2}},
+    )
+
+    assert status == "fail"
+    assert "polluted_pass_requires_review" in flags
+
+
+def test_refine_validation_status_keeps_clean_high_confidence_pass_stable() -> None:
+    status, flags = _refine_validation_status(
+        base_status="review",
+        base_validation_flags=[],
+        mapping_status="pass",
+        mapping_failure_reason="",
+        crop_uncertain=False,
+        extraction_quality_flags=[],
+        review_flags=["question_start_uncertain"],
+        question_structure_detected={"contamination_indicators": {"signal_score": 0}},
+    )
+
+    assert status == "review"
+    assert flags == []
+
+
+def test_refine_validation_status_does_not_blur_true_fail_into_polluted_pass_logic() -> None:
+    status, flags = _refine_validation_status(
+        base_status="fail",
+        base_validation_flags=["question_scope_contaminated"],
+        mapping_status="fail",
+        mapping_failure_reason="question_scope_contaminated",
+        crop_uncertain=True,
+        extraction_quality_flags=["likely_needs_visual_review"],
+        review_flags=["low_confidence_question_crop", "question_scope_contaminated"],
+        question_structure_detected={"contamination_indicators": {"signal_score": 7}},
+    )
+
+    assert status == "fail"
+    assert "question_scope_contaminated" in flags
+    assert "polluted_pass_requires_review" not in flags
+
+
+def test_refine_validation_status_escalates_structural_mapping_failures() -> None:
+    status, flags = _refine_validation_status(
+        base_status="review",
+        base_validation_flags=[],
+        mapping_status="fail",
+        mapping_failure_reason="question_subparts_incomplete",
+        crop_uncertain=False,
+        extraction_quality_flags=[],
+        review_flags=[],
+        question_structure_detected={"contamination_indicators": {"signal_score": 0}},
+    )
+
+    assert status == "fail"
+    assert "question_subparts_incomplete" in flags
+
+
+def test_assess_text_fidelity_marks_degraded_math_text_even_when_mapping_can_pass() -> None:
+    status, flags = _assess_text_fidelity(
+        question_text=(
+            "5 (a) The complex number u is given by\n"
+            "u = (coscos^{1}_{7}_{1}_{7}rr+-isinisin^{1}_{7}_{1}_{7}rr)^{4}.\n"
+            "(b) Describe the transformation. [2]"
+        ),
+        extraction_quality_flags=["heavy_math_density"],
+        review_flags=["ocr_merged_sparse_lower_region", "weak_question_text"],
+        validation_flags=[],
+        question_structure_detected={"missing_internal_subparts": [], "impossible_subpart_sequence_detected": False},
+        mapping_failure_reason="",
+        text_source_profile="hybrid",
+    )
+
+    assert status == "degraded"
+    assert "ocr_math_notation_degraded" in flags
+
+
+def test_assess_text_fidelity_marks_missing_visible_structure_as_unusable() -> None:
+    status, flags = _assess_text_fidelity(
+        question_text="1 ... (a) ... [3]",
+        extraction_quality_flags=[],
+        review_flags=[],
+        validation_flags=["question_subparts_incomplete"],
+        question_structure_detected={"missing_internal_subparts": [], "impossible_subpart_sequence_detected": False},
+        mapping_failure_reason="question_subparts_incomplete",
+        text_source_profile="native_pdf",
+    )
+
+    assert status == "unusable"
+    assert "missing_visible_structure_in_text" in flags
+
+
+def test_assess_text_fidelity_keeps_clean_text_clean() -> None:
+    status, flags = _assess_text_fidelity(
+        question_text="2 Find the coordinates of A. [1]\n(b) Find the equation of the new curve. [3]",
+        extraction_quality_flags=[],
+        review_flags=[],
+        validation_flags=[],
+        question_structure_detected={"missing_internal_subparts": [], "impossible_subpart_sequence_detected": False},
+        mapping_failure_reason="",
+        text_source_profile="native_pdf",
+    )
+
+    assert status == "clean"
+    assert flags == []
+
+
+def test_topic_trust_downgrades_when_text_is_degraded_even_if_otherwise_usable() -> None:
+    status = _derive_topic_trust_status(
+        topic_confidence="high",
+        topic_uncertain=False,
+        text_fidelity_status="degraded",
+        validation_status="review",
+        scope_quality_status="clean",
+    )
+
+    assert status == "degraded_text"
+
+
+def test_scope_quality_stays_failed_for_true_contamination_case() -> None:
+    status = _derive_scope_quality_status(
+        validation_flags=["question_scope_contaminated"],
+        review_flags=["possible_next_question_contamination"],
+        question_structure_detected={"contamination_detected": True},
+    )
+
+    assert status == "fail"
+
+
+def test_polluted_pass_signal_groups_collapse_overlap_into_named_clusters() -> None:
+    groups = _polluted_pass_signal_groups(
+        crop_uncertain=True,
+        base_validation_flags=["weak_question_anchor", "likely_truncated_question_crop"],
+        extraction_quality_flags=["likely_needs_visual_review", "broken_fraction_structure"],
+        review_flags=["low_confidence_question_crop", "crop_reaches_page_margin", "weak_question_text"],
+        question_structure_detected={"contamination_detected": False, "contamination_indicators": {"signal_score": 2}},
+    )
+
+    assert groups == {
+        "crop_risk",
+        "low_quality_text",
+        "pollution_signals",
+        "question_validation_risk",
+    }
+
+
+def test_paper_total_mismatch_triggers_rescan() -> None:
+    records = [
+        _record(question_number="1", paper_family="P1", topic="algebra", topic_confidence="high", combined_question_text="Q1"),
+        _record(question_number="2", paper_family="P1", topic="algebra", topic_confidence="high", combined_question_text="Q2"),
+    ]
+    records[0].question_marks_total = 30
+    records[1].question_marks_total = 40
+
+    total_check = _paper_total_check(records, component="12", paper_family="P1")
+
+    assert total_check["expected_total"] == 75
+    assert total_check["detected_total"] == 70
+    assert total_check["status"] == "mismatch"
+    assert _should_trigger_paper_total_rescan(total_check) is True
+
+
+def test_paper_total_match_does_not_trigger_rescan() -> None:
+    records = [
+        _record(question_number="1", paper_family="P5", topic="statistics", topic_confidence="high", combined_question_text="Q1"),
+        _record(question_number="2", paper_family="P5", topic="statistics", topic_confidence="high", combined_question_text="Q2"),
+    ]
+    records[0].question_marks_total = 20
+    records[1].question_marks_total = 30
+
+    total_check = _paper_total_check(records, component="53", paper_family="P5")
+
+    assert total_check["expected_total"] == 50
+    assert total_check["detected_total"] == 50
+    assert total_check["status"] == "matched"
+    assert _should_trigger_paper_total_rescan(total_check) is False

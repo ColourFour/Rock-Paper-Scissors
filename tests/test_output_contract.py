@@ -33,6 +33,7 @@ def _record() -> QuestionRecord:
         topic_evidence="fixture",
         secondary_topics=[],
         topic_uncertain=False,
+        topic_trust_status="normal",
         difficulty="easy",
         difficulty_confidence="high",
         difficulty_evidence="fixture",
@@ -52,6 +53,10 @@ def _record() -> QuestionRecord:
         question_marks_total=3,
         markscheme_marks_total=3,
         question_subparts=["a", "b"],
+        scope_quality_status="clean",
+        text_source_profile="native_pdf",
+        text_fidelity_status="clean",
+        text_fidelity_flags=[],
         mark_scheme_source_pdf="input/mark_schemes/9709 Mathematics March 2021 Mark Scheme  12.pdf",
     )
 
@@ -90,5 +95,17 @@ def test_export_records_writes_json_under_output_json_only(tmp_path: Path) -> No
     assert json_path.exists()
     assert payload[0]["question_image_paths"] == ["p1/12spring21/questions/q01.png"]
     assert payload[0]["mark_scheme_image_paths"] == ["p1/12spring21/mark_scheme/q01.png"]
+    assert payload[0]["notes"]["topic_confidence"] == "high"
+    assert payload[0]["notes"]["topic_trust_status"] == "normal"
+    assert payload[0]["notes"]["scope_quality_status"] == "clean"
+    assert payload[0]["notes"]["text_source_profile"] == "native_pdf"
+    assert payload[0]["notes"]["text_fidelity_status"] == "clean"
+    assert payload[0]["notes"]["text_fidelity_flags"] == []
+    assert "validation_status" in payload[0]["notes"]
+    assert "question_structure_detected" in payload[0]["notes"]
+    assert "paper_total_status" in payload[0]["notes"]
+    assert "rescan_result" in payload[0]["notes"]
+    assert "paper_total_before_rescan" in payload[0]["notes"]
+    assert "paper_total_focus_questions" in payload[0]["notes"]
     assert not (tmp_path / "output" / "csv").exists()
     assert not (tmp_path / "output" / "review").exists()

@@ -172,6 +172,7 @@ def render_mark_scheme_images(
     expected_numbers: list[str] | None = None,
     question_marks: dict[str, int | None] | None = None,
     question_subparts: dict[str, list[str]] | None = None,
+    question_validation_flags: dict[str, list[str]] | None = None,
 ) -> dict[str, MarkSchemeImageResult]:
     """Crop rendered mark-scheme answer regions by top-level question number.
 
@@ -184,6 +185,7 @@ def render_mark_scheme_images(
         return {}
     question_marks = question_marks or {}
     question_subparts = question_subparts or {}
+    question_validation_flags = question_validation_flags or {}
 
     try:
         import fitz
@@ -271,6 +273,7 @@ def render_mark_scheme_images(
                 next_anchor,
                 regions,
                 flags,
+                question_validation_flags=question_validation_flags.get(canonical_number, []),
             )
             flags.extend(validation_flags)
             if not regions:
@@ -1506,8 +1509,10 @@ def _validate_mark_scheme_mapping(
     next_anchor: MarkSchemeAnchor | None,
     regions: list[MarkSchemeCropRegion],
     flags: list[str],
+    question_validation_flags: list[str] | None = None,
 ) -> tuple[list[str], str]:
     validation_flags: list[str] = []
+    question_validation_flags = question_validation_flags or []
     if not anchor or not _table_header_ok(anchor.table):
         validation_flags.append("invalid_table_header")
         return validation_flags, "invalid_table_header"
@@ -1520,21 +1525,74 @@ def _validate_mark_scheme_mapping(
     if next_anchor and parent_question_id(next_anchor.question_number) == canonical_number:
         validation_flags.append("partial_question_block")
         return validation_flags, "partial_question_block"
-    missing = [part for part in question_subparts if part not in markscheme_subparts]
-    if missing:
-        validation_flags.append("missing_subparts")
-        return validation_flags, "missing_subparts"
-    extra_markscheme_subparts = [part for part in markscheme_subparts if part not in question_subparts]
-    if extra_markscheme_subparts:
-        validation_flags.append("question_subparts_incomplete")
-        return validation_flags, "question_subparts_incomplete"
-    if question_marks_total is None or markscheme_marks_total is None or question_marks_total != markscheme_marks_total:
-        validation_flags.append("marks_total_mismatch")
-        return validation_flags, "marks_total_mismatch"
-    if _block_contains_adjacent_question(canonical_number, regions, anchor, next_anchor):
-        validation_flags.append("adjacent_question_block_selected")
-        return validation_flags, "adjacent_question_block_selected"
+    candidate_reasons = _mapping_failure_candidates(
+        canonical_number=canonical_number,
+        question_subparts=question_subparts,
+        markscheme_subparts=markscheme_subparts,
+        question_marks_total=question_marks_total,
+        markscheme_marks_total=markscheme_marks_total,
+        anchor=anchor,
+        next_anchor=next_anchor,
+        regions=regions,
+        question_validation_flags=question_validation_flags,
+    )
+    failure_reason = _select_mapping_failure_reason(candidate_reasons)
+    if failure_reason:
+        validation_flags.append(failure_reason)
+        return validation_flags, failure_reason
     return validation_flags, ""
+
+
+def _mapping_failure_candidates(
+    *,
+    canonical_number: str,
+    question_subparts: list[str],
+    markscheme_subparts: list[str],
+    question_marks_total: int | None,
+    markscheme_marks_total: int | None,
+    anchor: MarkSchemeAnchor,
+    next_anchor: MarkSchemeAnchor | None,
+    regions: list[MarkSchemeCropRegion],
+    question_validation_flags: list[str],
+) -> list[str]:
+    candidates: list[str] = []
+    if "question_scope_contaminated" in question_validation_flags:
+        candidates.append("question_scope_contaminated")
+    if any(part not in markscheme_subparts for part in question_subparts):
+        candidates.append("mark_scheme_part_structure_mismatch")
+    if any(part not in question_subparts for part in markscheme_subparts):
+        candidates.append("question_subparts_incomplete")
+    if "missing_terminal_mark_total" in question_validation_flags and (markscheme_subparts or question_subparts):
+        candidates.append("missing_terminal_mark_total")
+    if question_marks_total is None and markscheme_marks_total is not None:
+        candidates.append("question_mark_total_missing")
+    if question_marks_total is not None and markscheme_marks_total is not None and question_marks_total != markscheme_marks_total:
+        candidates.append("question_mark_total_mismatch")
+    if "likely_truncated_question_crop" in question_validation_flags:
+        candidates.append("likely_truncated_question_crop")
+    if "weak_question_anchor" in question_validation_flags:
+        candidates.append("weak_question_anchor")
+    if _block_contains_adjacent_question(canonical_number, regions, anchor, next_anchor):
+        candidates.append("adjacent_question_block_selected")
+    return candidates
+
+
+def _select_mapping_failure_reason(candidates: list[str]) -> str:
+    priority = [
+        "question_scope_contaminated",
+        "mark_scheme_part_structure_mismatch",
+        "question_subparts_incomplete",
+        "missing_terminal_mark_total",
+        "question_mark_total_missing",
+        "question_mark_total_mismatch",
+        "likely_truncated_question_crop",
+        "weak_question_anchor",
+        "adjacent_question_block_selected",
+    ]
+    for reason in priority:
+        if reason in candidates:
+            return reason
+    return ""
 
 
 def _block_contains_adjacent_question(

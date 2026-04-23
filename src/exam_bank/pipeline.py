@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 import json
 from pathlib import Path
@@ -17,7 +18,7 @@ from .image_rendering import render_question_image
 from .mark_schemes import MarkSchemeImageResult, extract_mark_scheme_answers, find_mark_scheme, render_mark_scheme_images
 from .models import ClassificationResult, PageLayout, QuestionRecord, QuestionSpan
 from .pdf_extract import extract_pdf_layout
-from .question_detection import detect_question_anchor_candidates, detect_question_spans, extract_marks_from_text
+from .question_detection import detect_question_anchor_candidates, detect_question_spans, extract_marks_from_text, extract_question_total_from_text
 
 
 @dataclass(frozen=True)
@@ -98,10 +99,105 @@ def build_records_for_pdf(
     parsed_filename_metadata = filename_metadata or parse_filename_metadata(question_pdf)
     internal_metadata = parse_internal_document_metadata(layouts)
     document_metadata = reconcile_document_metadata(parsed_filename_metadata, internal_metadata)
-    spans = detect_question_spans(layouts, question_pdf, config)
+    initial_spans = detect_question_spans(layouts, question_pdf, config)
+    source_paper_code, _source_paper_code_confidence = infer_source_paper_code(question_pdf.name)
+    source_paper_code = document_metadata.component or source_paper_code
+
+    initial_records = _build_records_from_spans(
+        question_pdf=question_pdf,
+        layouts=layouts,
+        spans=initial_spans,
+        config=config,
+        mark_scheme_pdf=mark_scheme_pdf,
+        examiner_report_paths=examiner_report_paths,
+        document_metadata=document_metadata,
+        registry_warnings=registry_warnings or [],
+        source_paper_code=source_paper_code,
+    )
+    initial_total_check = _paper_total_check(
+        initial_records,
+        component=document_metadata.component or source_paper_code,
+        paper_family=initial_records[0].paper_family if initial_records else "",
+    )
+
+    final_spans = initial_spans
+    final_records = initial_records
+    final_total_check = initial_total_check
+    final_layouts = layouts
+    rescan_triggered = False
+    rescan_result = "not_triggered"
+
+    if _should_trigger_paper_total_rescan(initial_total_check):
+        rescan_triggered = True
+        broader_config = _broadened_detection_config(config)
+        rescanned_layouts = extract_pdf_layout(question_pdf, broader_config)
+        rescanned_spans = detect_question_spans(rescanned_layouts, question_pdf, broader_config)
+        rescanned_records = _build_records_from_spans(
+            question_pdf=question_pdf,
+            layouts=rescanned_layouts,
+            spans=rescanned_spans,
+            config=config,
+            mark_scheme_pdf=mark_scheme_pdf,
+            examiner_report_paths=examiner_report_paths,
+            document_metadata=document_metadata,
+            registry_warnings=registry_warnings or [],
+            source_paper_code=source_paper_code,
+        )
+        rescanned_total_check = _paper_total_check(
+            rescanned_records,
+            component=document_metadata.component or source_paper_code,
+            paper_family=rescanned_records[0].paper_family if rescanned_records else "",
+        )
+        (
+            final_spans,
+            final_records,
+            final_total_check,
+            rescan_result,
+        ) = _select_preferred_detection_pass(
+            initial_spans=initial_spans,
+            initial_records=initial_records,
+            initial_total_check=initial_total_check,
+            rescanned_spans=rescanned_spans,
+            rescanned_records=rescanned_records,
+            rescanned_total_check=rescanned_total_check,
+        )
+        if final_spans is rescanned_spans:
+            final_layouts = rescanned_layouts
+
+    _reconcile_paper_topics(final_records, config)
+    _apply_paper_total_metadata(
+        final_records,
+        initial_total_check=initial_total_check,
+        total_check=final_total_check,
+        rescan_triggered=rescan_triggered,
+        rescan_result=rescan_result,
+        focus=_paper_total_focus(final_records),
+    )
+    if config.debug.enabled:
+        _write_pdf_diagnostic(question_pdf, final_layouts, final_spans, final_records, config)
+    return final_records
+
+
+def _build_records_from_spans(
+    *,
+    question_pdf: Path,
+    layouts: list[PageLayout],
+    spans: list[QuestionSpan],
+    config: AppConfig,
+    mark_scheme_pdf: str | Path | None,
+    examiner_report_paths: list[Path] | None,
+    document_metadata: DocumentMetadata,
+    registry_warnings: list[str],
+    source_paper_code: str,
+) -> list[QuestionRecord]:
     expected_numbers = [span.question_number for span in spans if span.question_number.isdigit()]
-    expected_marks = {span.question_number: extract_marks_from_text(span.combined_text) for span in spans if span.question_number.isdigit()}
+    expected_marks = {
+        span.question_number: span.question_total_detected if span.question_total_detected is not None else extract_question_total_from_text(span.combined_text)
+        for span in spans
+        if span.question_number.isdigit()
+    }
     expected_subparts = {span.question_number: _question_subparts_from_span(span) for span in spans if span.question_number.isdigit()}
+    expected_validation_flags = {span.question_number: list(span.validation_flags) for span in spans if span.question_number.isdigit()}
 
     matched_mark_scheme = Path(mark_scheme_pdf) if mark_scheme_pdf else find_mark_scheme(
         question_pdf,
@@ -123,6 +219,7 @@ def build_records_for_pdf(
                 expected_numbers,
                 question_marks=expected_marks,
                 question_subparts=expected_subparts,
+                question_validation_flags=expected_validation_flags,
             )
         except Exception as exc:
             mark_scheme_flags.append(f"markscheme_image_export_failed:{exc.__class__.__name__}")
@@ -130,13 +227,12 @@ def build_records_for_pdf(
         mark_scheme_flags.append("unmatched_mark_scheme")
 
     records: list[QuestionRecord] = []
-    source_paper_code, _source_paper_code_confidence = infer_source_paper_code(question_pdf.name)
-    source_paper_code = document_metadata.component or source_paper_code
     for span in spans:
+        question_subparts = _question_subparts_from_span(span)
         render_result = render_question_image(question_pdf, span, layouts, config)
         structured_text = build_structured_question_text(span, layouts, config)
         question_text = structured_text.combined_question_text or render_result.extracted_text or span.combined_text
-        marks = extract_marks_from_text(question_text)
+        marks = span.question_total_detected if span.question_total_detected is not None else extract_question_total_from_text(question_text)
         answer_text = answers.get(span.question_number, "")
         mark_scheme_image = mark_scheme_images.get(span.question_number)
         examiner_evidence = None
@@ -158,6 +254,7 @@ def build_records_for_pdf(
                 answer_text=answer_text,
                 render_result=render_result,
                 structured_text=structured_text,
+                question_subparts=question_subparts,
                 mark_scheme_image=mark_scheme_image,
                 mark_scheme_flags=mark_scheme_flags,
                 matched_mark_scheme=matched_mark_scheme,
@@ -169,9 +266,6 @@ def build_records_for_pdf(
                 examiner_text=examiner_text,
             )
         )
-    _reconcile_paper_topics(records, config)
-    if config.debug.enabled:
-        _write_pdf_diagnostic(question_pdf, layouts, spans, records, config)
     return records
 
 
@@ -184,6 +278,7 @@ def _build_question_record(
     answer_text: str,
     render_result,
     structured_text,
+    question_subparts: list[str],
     mark_scheme_image: MarkSchemeImageResult | None,
     mark_scheme_flags: list[str],
     matched_mark_scheme: Path | None,
@@ -241,6 +336,38 @@ def _build_question_record(
         flags.extend(question_topic["review_flags"])
         flags.extend(render_result.review_flags)
         confidence = _record_confidence(float(question_topic["confidence"]), flags)
+        validation_status, validation_flags = _refine_validation_status(
+            base_status=span.validation_status,
+            base_validation_flags=span.validation_flags,
+            mapping_status=mark_scheme_image.mapping_status if mark_scheme_image else "fail",
+            mapping_failure_reason=mark_scheme_image.failure_reason if mark_scheme_image else "",
+            crop_uncertain=render_result.crop_uncertain,
+            extraction_quality_flags=structured_text.extraction_quality_flags,
+            review_flags=flags,
+            question_structure_detected=span.structure_detected,
+        )
+        scope_quality_status = _derive_scope_quality_status(
+            validation_flags=validation_flags,
+            review_flags=flags,
+            question_structure_detected=span.structure_detected,
+        )
+        text_source_profile = _text_source_profile(flags)
+        text_fidelity_status, text_fidelity_flags = _assess_text_fidelity(
+            question_text=question_text,
+            extraction_quality_flags=structured_text.extraction_quality_flags,
+            review_flags=flags,
+            validation_flags=validation_flags,
+            question_structure_detected=span.structure_detected,
+            mapping_failure_reason=mark_scheme_image.failure_reason if mark_scheme_image else "",
+            text_source_profile=text_source_profile,
+        )
+        topic_trust_status = _derive_topic_trust_status(
+            topic_confidence=str(question_topic["topic_confidence"]),
+            topic_uncertain=bool(question_topic["topic_uncertain"]),
+            text_fidelity_status=text_fidelity_status,
+            validation_status=validation_status,
+            scope_quality_status=scope_quality_status,
+        )
 
         return QuestionRecord(
                 source_pdf=_display_path(question_pdf),
@@ -310,12 +437,31 @@ def _build_question_record(
                 markscheme_debug_paths=mark_scheme_image.debug_paths if mark_scheme_image else [],
                 markscheme_table_header_ok=mark_scheme_image.table_header_ok if mark_scheme_image else False,
                 markscheme_continuation_rows_included=mark_scheme_image.continuation_rows_included if mark_scheme_image else False,
-                question_subparts=mark_scheme_image.question_subparts if mark_scheme_image else [],
+                question_subparts=question_subparts,
                 markscheme_subparts=mark_scheme_image.markscheme_subparts if mark_scheme_image else [],
                 question_marks_total=mark_scheme_image.question_marks_total if mark_scheme_image else marks,
                 markscheme_marks_total=mark_scheme_image.markscheme_marks_total if mark_scheme_image else None,
                 markscheme_mapping_status=mark_scheme_image.mapping_status if mark_scheme_image else "fail",
                 markscheme_failure_reason=mark_scheme_image.failure_reason if mark_scheme_image else "partial_question_block",
+                validation_status=validation_status,
+                validation_flags=validation_flags,
+                scope_quality_status=scope_quality_status,
+                text_source_profile=text_source_profile,
+                text_fidelity_status=text_fidelity_status,
+                text_fidelity_flags=text_fidelity_flags,
+                topic_trust_status=topic_trust_status,
+                recovery_attempted=span.recovery_attempted,
+                recovery_result=span.recovery_result,
+                question_structure_detected=span.structure_detected,
+                mark_scheme_structure_detected={
+                    "subparts": mark_scheme_image.markscheme_subparts if mark_scheme_image else [],
+                    "question_subparts": mark_scheme_image.question_subparts if mark_scheme_image else [],
+                    "question_total_detected": mark_scheme_image.question_marks_total if mark_scheme_image else None,
+                    "mark_scheme_total_detected": mark_scheme_image.markscheme_marks_total if mark_scheme_image else None,
+                },
+                question_total_detected=span.question_total_detected,
+                mark_scheme_total_detected=mark_scheme_image.markscheme_marks_total if mark_scheme_image else None,
+                question_format_profile=span.format_profile,
             )
 
 
@@ -355,9 +501,433 @@ def _question_subparts_from_span(span: QuestionSpan) -> list[str]:
     return _question_subparts_from_text("\n".join(lines))
 
 
+def _broadened_detection_config(config: AppConfig) -> AppConfig:
+    broader = deepcopy(config)
+    broader.detection.anchor_min_confidence = max(0.45, config.detection.anchor_min_confidence - 0.08)
+    broader.detection.anchor_y_tolerance = config.detection.anchor_y_tolerance + 8
+    broader.detection.prompt_region_max_gap = config.detection.prompt_region_max_gap + 30
+    broader.detection.crop_padding = config.detection.crop_padding + 8
+    broader.detection.crop_bottom_margin = max(18, config.detection.crop_bottom_margin - 12)
+    return broader
+
+
+def _record_solution_marks(record: QuestionRecord) -> int | None:
+    for value in [record.markscheme_marks_total, record.question_marks_total, record.marks_if_available, record.marks]:
+        if value is not None:
+            return int(value)
+    return None
+
+
+def _derive_scope_quality_status(
+    *,
+    validation_flags: list[str],
+    review_flags: list[str],
+    question_structure_detected: dict[str, Any],
+) -> str:
+    if (
+        question_structure_detected.get("contamination_detected")
+        or any(
+            flag in validation_flags or flag in review_flags
+            for flag in {
+                "question_scope_contaminated",
+                "question_start_mismatch",
+                "possible_next_question_contamination",
+                "likely_truncated_question_crop",
+            }
+        )
+    ):
+        return "fail"
+    if any(
+        flag in validation_flags or flag in review_flags
+        for flag in {
+            "weak_question_anchor",
+            "question_start_uncertain",
+            "question_sequence_gap",
+            "paper_total_focus_candidate",
+        }
+    ):
+        return "review"
+    return "clean"
+
+
+def _text_source_profile(review_flags: list[str]) -> str:
+    if any(flag.startswith("ocr_merged") for flag in review_flags):
+        return "hybrid"
+    if "ocr_question_text" in review_flags:
+        return "ocr"
+    return "native_pdf"
+
+
+def _assess_text_fidelity(
+    *,
+    question_text: str,
+    extraction_quality_flags: list[str],
+    review_flags: list[str],
+    validation_flags: list[str],
+    question_structure_detected: dict[str, Any],
+    mapping_failure_reason: str,
+    text_source_profile: str,
+) -> tuple[str, list[str]]:
+    flags: set[str] = set()
+    strong_corruption_flags = {
+        "likely_needs_visual_review",
+        "math_corruption_suspected",
+        "broken_fraction_structure",
+        "broken_superscript_or_power",
+        "suspicious_symbol_run",
+        "flattened_display_math",
+        "diagram_text_mixed_with_body",
+    }
+    if any(flag in extraction_quality_flags for flag in strong_corruption_flags):
+        flags.add("math_text_corruption_detected")
+    if _text_has_suspicious_ocr_noise(question_text):
+        flags.add("ocr_noise_fragment_present")
+    if _text_has_corrupted_math_notation(question_text):
+        flags.add("ocr_math_notation_degraded")
+    if (
+        mapping_failure_reason == "question_subparts_incomplete"
+        or "question_subparts_incomplete" in validation_flags
+        or bool(question_structure_detected.get("missing_internal_subparts"))
+        or bool(question_structure_detected.get("impossible_subpart_sequence_detected"))
+    ):
+        flags.add("missing_visible_structure_in_text")
+    if (
+        text_source_profile != "native_pdf"
+        and "heavy_math_density" in extraction_quality_flags
+        and ("ocr_noise_fragment_present" in flags or "ocr_math_notation_degraded" in flags)
+    ):
+        flags.add("hybrid_math_text_requires_review")
+    if "weak_question_text" in review_flags and flags:
+        flags.add("weak_extracted_text")
+
+    status = "clean"
+    if "missing_visible_structure_in_text" in flags:
+        status = "unusable"
+    elif flags:
+        status = "degraded"
+    return status, sorted(flags)
+
+
+def _text_has_suspicious_ocr_noise(text: str) -> bool:
+    normalized_lines = [line.strip() for line in str(text).splitlines() if line.strip()]
+    for line in normalized_lines:
+        lowered = line.lower()
+        if lowered in {"anne", "fy"} or any(token in lowered for token in {"| anne", "| fy", "¢"}):
+            return True
+        if re.fullmatch(r"[|¦Il1]\s*[A-Za-z]{2,6}", line):
+            return True
+        if re.fullmatch(r"[A-Za-z]{2,6}[!?]", line):
+            return True
+        if re.search(r"\b[A-Za-z]{3,}[!?]\b", line):
+            return True
+    return False
+
+
+def _text_has_corrupted_math_notation(text: str) -> bool:
+    normalized = str(text)
+    patterns = [
+        r"(?:sin|cos|tan|sec|cot){2,}",
+        r"\b[a-z]*(?:sin|cos|tan|sec|cot){2,}[a-z]*\b",
+        r"\^\{[^}]{1,4}\}_\{[^}]{1,4}\}r",
+        r"[A-Za-z]{1,3},,",
+    ]
+    return any(re.search(pattern, normalized, re.IGNORECASE) for pattern in patterns)
+
+
+def _derive_topic_trust_status(
+    *,
+    topic_confidence: str,
+    topic_uncertain: bool,
+    text_fidelity_status: str,
+    validation_status: str,
+    scope_quality_status: str,
+) -> str:
+    if validation_status == "fail" or scope_quality_status == "fail":
+        return "review_required"
+    if text_fidelity_status != "clean":
+        return "degraded_text"
+    if topic_uncertain or topic_confidence == "low":
+        return "review_required"
+    return "normal"
+
+
+def _expected_paper_total(component: str, paper_family: str = "") -> int | None:
+    family = (paper_family or "").strip().upper()
+    if family in {"P1", "P3", "P4", "P5"}:
+        return {"P1": 75, "P3": 75, "P4": 50, "P5": 50}[family]
+
+    digits = "".join(char for char in str(component) if char.isdigit())
+    if digits:
+        return {"1": 75, "3": 75, "4": 50, "5": 50}.get(digits[0])
+    return None
+
+
+def _paper_total_check(
+    records: list[QuestionRecord],
+    *,
+    component: str,
+    paper_family: str,
+) -> dict[str, int | str | bool | None]:
+    expected_total = _expected_paper_total(component, paper_family)
+    detected_total = sum(mark for record in records if (mark := _record_solution_marks(record)) is not None)
+    status = "unknown_expected_total"
+    if expected_total is not None:
+        status = "matched" if detected_total == expected_total else "mismatch"
+    return {
+        "expected_total": expected_total,
+        "detected_total": detected_total,
+        "status": status,
+        "difference": None if expected_total is None else detected_total - expected_total,
+    }
+
+
+def _should_trigger_paper_total_rescan(total_check: dict[str, int | str | bool | None]) -> bool:
+    return total_check.get("expected_total") is not None and total_check.get("status") == "mismatch"
+
+
+def _structural_failure_count(records: list[QuestionRecord]) -> int:
+    structural_flags = {
+        "question_subparts_incomplete",
+        "question_scope_contaminated",
+        "missing_terminal_mark_total",
+        "question_mark_total_mismatch",
+        "question_mark_total_missing",
+        "likely_truncated_question_crop",
+    }
+    count = 0
+    for record in records:
+        if any(flag in structural_flags for flag in record.validation_flags):
+            count += 1
+            continue
+        if record.markscheme_failure_reason in structural_flags:
+            count += 1
+    return count
+
+
+def _paper_total_preference_key(
+    total_check: dict[str, int | str | bool | None],
+    records: list[QuestionRecord],
+) -> tuple[int, int, int]:
+    expected_total = total_check.get("expected_total")
+    detected_total = int(total_check.get("detected_total") or 0)
+    if expected_total is None:
+        distance = 10**6
+    else:
+        distance = abs(detected_total - int(expected_total))
+    return (-distance, -_structural_failure_count(records), len(records))
+
+
+def _select_preferred_detection_pass(
+    *,
+    initial_spans: list[QuestionSpan],
+    initial_records: list[QuestionRecord],
+    initial_total_check: dict[str, int | str | bool | None],
+    rescanned_spans: list[QuestionSpan],
+    rescanned_records: list[QuestionRecord],
+    rescanned_total_check: dict[str, int | str | bool | None],
+) -> tuple[
+    list[QuestionSpan],
+    list[QuestionRecord],
+    dict[str, int | str | bool | None],
+    str,
+]:
+    if rescanned_total_check.get("status") == "matched" and initial_total_check.get("status") != "matched":
+        return rescanned_spans, rescanned_records, rescanned_total_check, "recovered_exact_total"
+
+    if _paper_total_preference_key(rescanned_total_check, rescanned_records) > _paper_total_preference_key(initial_total_check, initial_records):
+        result = "improved_but_still_mismatch"
+        if rescanned_total_check.get("status") == "matched":
+            result = "recovered_exact_total"
+        return rescanned_spans, rescanned_records, rescanned_total_check, result
+
+    return initial_spans, initial_records, initial_total_check, "no_improvement"
+
+
+def _apply_paper_total_metadata(
+    records: list[QuestionRecord],
+    *,
+    initial_total_check: dict[str, int | str | bool | None],
+    total_check: dict[str, int | str | bool | None],
+    rescan_triggered: bool,
+    rescan_result: str,
+    focus: dict[str, object],
+) -> None:
+    before_total = initial_total_check.get("detected_total")
+    expected_total = total_check.get("expected_total")
+    detected_total = total_check.get("detected_total")
+    status = str(total_check.get("status") or "")
+    focus_questions = [str(question) for question in focus.get("question_numbers", [])]
+    focus_pages = [int(page) for page in focus.get("pages", [])]
+    reasons_by_question = dict(focus.get("reasons_by_question", {}))
+    if status == "matched" and rescan_triggered:
+        status = "recovered_after_rescan" if rescan_result == "recovered_exact_total" else "matched"
+    elif status == "mismatch" and rescan_triggered:
+        status = "mismatch_after_rescan"
+
+    for record in records:
+        record.paper_total_expected = int(expected_total) if expected_total is not None else None
+        record.paper_total_detected = int(detected_total) if detected_total is not None else None
+        record.paper_total_status = status
+        record.rescan_triggered = rescan_triggered
+        record.rescan_result = rescan_result
+        record.paper_total_before_rescan = int(before_total) if before_total is not None else None
+        record.paper_total_after_rescan = int(detected_total) if detected_total is not None else None
+        record.paper_total_focus_questions = list(focus_questions)
+        record.paper_total_focus_pages = list(focus_pages)
+        record.paper_total_focus_reason = str(reasons_by_question.get(record.question_number, ""))
+
+        review_flags = set(record.review_flags)
+        if rescan_triggered:
+            review_flags.add("paper_total_rescan_triggered")
+        if rescan_result == "recovered_exact_total":
+            review_flags.add("paper_total_rescan_recovered")
+        if record.question_number in focus_questions:
+            review_flags.add("paper_total_focus_candidate")
+        if status == "mismatch_after_rescan":
+            review_flags.add("paper_total_mismatch")
+        record.review_flags = sorted(review_flags)
+
+        validation_flags = set(record.validation_flags)
+        if status == "mismatch_after_rescan":
+            validation_flags.add("paper_total_mismatch")
+            record.validation_status = "fail"
+        record.validation_flags = sorted(validation_flags)
+
+
+def _paper_total_focus(records: list[QuestionRecord]) -> dict[str, object]:
+    scored: list[tuple[int, str, list[int], list[str]]] = []
+    for record in records:
+        reasons: list[str] = []
+        structural_reason = record.markscheme_failure_reason
+        if structural_reason in {
+            "question_scope_contaminated",
+            "question_subparts_incomplete",
+            "question_mark_total_mismatch",
+            "question_mark_total_missing",
+        }:
+            reasons.append(structural_reason)
+        if "weak_question_anchor" in record.validation_flags or "question_start_uncertain" in record.review_flags:
+            reasons.append("anchor_or_boundary")
+        if "possible_next_question_contamination" in record.review_flags:
+            reasons.append("adjacent_boundary_contamination")
+        if record.recovery_attempted and record.recovery_result == "no_change":
+            reasons.append("recovery_stalled")
+        if len(record.page_numbers) > 1:
+            reasons.append("cross_page_scope")
+        if not reasons:
+            continue
+        score = 0
+        priority = {
+            "question_scope_contaminated": 5,
+            "question_subparts_incomplete": 5,
+            "question_mark_total_mismatch": 4,
+            "question_mark_total_missing": 4,
+            "anchor_or_boundary": 3,
+            "adjacent_boundary_contamination": 3,
+            "recovery_stalled": 2,
+            "cross_page_scope": 1,
+        }
+        for reason in reasons:
+            score += priority.get(reason, 1)
+        scored.append((score, record.question_number, list(record.page_numbers), reasons))
+
+    scored.sort(key=lambda item: (-item[0], int(item[1]) if item[1].isdigit() else 999, item[1]))
+    top = scored[:3]
+    pages: list[int] = []
+    question_numbers: list[str] = []
+    reasons_by_question: dict[str, str] = {}
+    for _score, question_number, record_pages, reasons in top:
+        question_numbers.append(question_number)
+        for page in record_pages:
+            if page not in pages:
+                pages.append(page)
+        reasons_by_question[question_number] = ", ".join(reasons)
+    return {
+        "question_numbers": question_numbers,
+        "pages": pages,
+        "reasons_by_question": reasons_by_question,
+    }
+
+
 def _record_confidence(classification_confidence: float, flags: list[str]) -> float:
     penalty = min(0.45, len(set(flags)) * 0.04)
     return max(0.05, min(0.98, classification_confidence - penalty))
+
+
+def _refine_validation_status(
+    *,
+    base_status: str,
+    base_validation_flags: list[str],
+    mapping_status: str,
+    mapping_failure_reason: str,
+    crop_uncertain: bool,
+    extraction_quality_flags: list[str],
+    review_flags: list[str],
+    question_structure_detected: dict[str, Any],
+) -> tuple[str, list[str]]:
+    validation_flags = list(base_validation_flags)
+    status = base_status
+
+    structural_mapping_failures = {
+        "question_subparts_incomplete",
+        "question_scope_contaminated",
+        "missing_terminal_mark_total",
+        "question_mark_total_mismatch",
+        "question_mark_total_missing",
+        "likely_truncated_question_crop",
+    }
+    if mapping_failure_reason in structural_mapping_failures:
+        status = "fail"
+        if mapping_failure_reason not in validation_flags:
+            validation_flags.append(mapping_failure_reason)
+
+    support_groups = _polluted_pass_signal_groups(
+        crop_uncertain=crop_uncertain,
+        base_validation_flags=base_validation_flags,
+        extraction_quality_flags=extraction_quality_flags,
+        review_flags=review_flags,
+        question_structure_detected=question_structure_detected,
+    )
+    if mapping_status == "pass" and len(support_groups) >= 2:
+        status = "fail"
+        if "polluted_pass_requires_review" not in validation_flags:
+            validation_flags.append("polluted_pass_requires_review")
+
+    return status, sorted(set(validation_flags))
+
+
+def _polluted_pass_signal_groups(
+    *,
+    crop_uncertain: bool,
+    base_validation_flags: list[str],
+    extraction_quality_flags: list[str],
+    review_flags: list[str],
+    question_structure_detected: dict[str, Any],
+) -> set[str]:
+    if not crop_uncertain:
+        return set()
+
+    groups: set[str] = set()
+    if any(
+        flag in extraction_quality_flags
+        for flag in {"likely_needs_visual_review", "math_corruption_suspected", "broken_fraction_structure", "suspicious_symbol_run"}
+    ):
+        groups.add("low_quality_text")
+    if any(
+        flag in review_flags
+        for flag in {"low_confidence_question_crop", "crop_reaches_page_margin", "weak_question_text"}
+    ):
+        groups.add("crop_risk")
+    if any(
+        flag in base_validation_flags
+        for flag in {"weak_question_anchor", "likely_truncated_question_crop", "missing_terminal_mark_total"}
+    ):
+        groups.add("question_validation_risk")
+    contamination_indicators = question_structure_detected.get("contamination_indicators") or {}
+    contamination_signal_score = int(contamination_indicators.get("signal_score", 0))
+    if question_structure_detected.get("contamination_detected") or contamination_signal_score >= 2:
+        groups.add("pollution_signals")
+    return groups
 
 
 def _question_topic_from_parts(

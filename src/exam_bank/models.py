@@ -86,6 +86,13 @@ class QuestionSpan:
     full_question_label: str
     review_flags: list[str] = field(default_factory=list)
     anchor: QuestionStart | None = None
+    validation_status: str = "pass"
+    validation_flags: list[str] = field(default_factory=list)
+    recovery_attempted: bool = False
+    recovery_result: str = ""
+    structure_detected: dict[str, Any] = field(default_factory=dict)
+    question_total_detected: int | None = None
+    format_profile: str = "legacy"
 
     @property
     def combined_text(self) -> str:
@@ -197,6 +204,20 @@ class QuestionRecord:
     markscheme_marks_total: int | None = None
     markscheme_mapping_status: str = ""
     markscheme_failure_reason: str = ""
+    validation_status: str = ""
+    validation_flags: list[str] = field(default_factory=list)
+    scope_quality_status: str = ""
+    text_source_profile: str = ""
+    text_fidelity_status: str = ""
+    text_fidelity_flags: list[str] = field(default_factory=list)
+    topic_trust_status: str = ""
+    recovery_attempted: bool = False
+    recovery_result: str = ""
+    question_structure_detected: dict[str, Any] = field(default_factory=dict)
+    mark_scheme_structure_detected: dict[str, Any] = field(default_factory=dict)
+    question_total_detected: int | None = None
+    mark_scheme_total_detected: int | None = None
+    question_format_profile: str = ""
     reconciliation_changed_topic: bool = False
     reconciliation_reason: str = ""
     reconciliation_note: str = ""
@@ -209,6 +230,16 @@ class QuestionRecord:
     paper_repair_candidates: list[str] = field(default_factory=list)
     paper_repair_missing_topics: list[str] = field(default_factory=list)
     paper_repair_supporting_evidence: dict[str, Any] = field(default_factory=dict)
+    paper_total_expected: int | None = None
+    paper_total_detected: int | None = None
+    paper_total_status: str = ""
+    rescan_triggered: bool = False
+    rescan_result: str = ""
+    paper_total_before_rescan: int | None = None
+    paper_total_after_rescan: int | None = None
+    paper_total_focus_questions: list[str] = field(default_factory=list)
+    paper_total_focus_pages: list[int] = field(default_factory=list)
+    paper_total_focus_reason: str = ""
 
 
 def _clean_model_text(text: str) -> str:

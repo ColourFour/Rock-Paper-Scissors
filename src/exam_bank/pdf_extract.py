@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from statistics import median
 from pathlib import Path
+import re
 from typing import Any
 
 from .config import AppConfig
@@ -56,6 +57,19 @@ def extract_pdf_layout(pdf_path: str | Path, config: AppConfig, use_ocr: bool | 
                         warning = "weak_text_no_ocr_words"
                 else:
                     warning = "weak_text_ocr_disabled"
+            elif ocr_enabled:
+                try:
+                    supplemental_ocr_blocks = _supplemental_sparse_lower_ocr_blocks(page, page_number, blocks, config, fitz)
+                except Exception as exc:  # pragma: no cover - depends on local OCR install
+                    supplemental_ocr_blocks = []
+                    if warning is None:
+                        warning = f"ocr_failed:{exc.__class__.__name__}"
+                if supplemental_ocr_blocks:
+                    merged_blocks = _merge_pdf_and_ocr_blocks(blocks, supplemental_ocr_blocks)
+                    if len(merged_blocks) > len(blocks):
+                        blocks = merged_blocks
+                        source = "pdf+ocr"
+                        warning = "ocr_merged_sparse_lower_region"
 
             layouts.append(
                 PageLayout(
@@ -353,7 +367,11 @@ def _is_meaningful_graphic_box(box: BoundingBox, page_width: float, page_height:
 def _merge_pdf_and_ocr_blocks(pdf_blocks: list[TextBlock], ocr_blocks: list[TextBlock]) -> list[TextBlock]:
     merged = list(pdf_blocks)
     for ocr_block in ocr_blocks:
-        if any(_boxes_overlap_ratio(existing.bbox, ocr_block.bbox) >= 0.55 for existing in pdf_blocks):
+        if any(
+            _boxes_overlap_ratio(existing.bbox, ocr_block.bbox) >= 0.55
+            and not _existing_block_should_yield_to_ocr(existing)
+            for existing in pdf_blocks
+        ):
             continue
         merged.append(ocr_block)
     return sorted(merged, key=lambda block: (block.bbox.y0, block.bbox.x0))
@@ -387,7 +405,146 @@ def _visual_box_from_rect(page: Any, rect_like: Any) -> BoundingBox:
         return BoundingBox(float(x0), float(y0), float(x1), float(y1))
 
 
-def _ocr_page(page: Any, page_number: int, config: AppConfig) -> list[TextBlock]:
+def _supplemental_sparse_lower_ocr_blocks(
+    page: Any,
+    page_number: int,
+    pdf_blocks: list[TextBlock],
+    config: AppConfig,
+    fitz: Any,
+) -> list[TextBlock]:
+    clip = _sparse_lower_ocr_clip(page, pdf_blocks, config, fitz)
+    if clip is None:
+        return []
+
+    ocr_blocks = _ocr_page(
+        page,
+        page_number,
+        config,
+        clip=clip,
+        context="ocr_sparse_lower_region",
+    )
+    if not ocr_blocks:
+        return []
+
+    signal_blocks = [block for block in ocr_blocks if _is_sparse_lower_region_signal(block.text)]
+    if not signal_blocks:
+        return []
+
+    return [
+        block
+        for block in ocr_blocks
+        if _is_sparse_lower_region_keep_block(block.text)
+    ]
+
+
+def _sparse_lower_ocr_clip(
+    page: Any,
+    pdf_blocks: list[TextBlock],
+    config: AppConfig,
+    fitz: Any,
+) -> Any | None:
+    page_height = float(page.rect.height)
+    body_top = float(config.detection.crop_top_margin)
+    body_bottom = page_height - float(config.detection.crop_bottom_margin)
+    substantive_blocks = [
+        block
+        for block in sorted(pdf_blocks, key=lambda item: (item.bbox.y0, item.bbox.x0))
+        if _is_sparse_lower_region_body_block(block, page_height, config)
+    ]
+    if not substantive_blocks:
+        return None
+
+    last_body_block = substantive_blocks[-1]
+    tail_gap = body_bottom - last_body_block.bbox.y1
+    min_gap = max(150.0, config.detection.prompt_region_max_gap * 2.4)
+    if tail_gap < min_gap:
+        return None
+    if last_body_block.bbox.y1 >= body_bottom - max(110.0, config.detection.prompt_region_max_gap * 1.4):
+        return None
+
+    start_y = max(
+        last_body_block.bbox.y1 + config.detection.crop_padding + 6.0,
+        body_top + 70.0,
+    )
+    if start_y >= body_bottom - 40:
+        return None
+
+    return fitz.Rect(0, start_y, float(page.rect.width), body_bottom)
+
+
+def _is_sparse_lower_region_body_block(block: TextBlock, page_height: float, config: AppConfig) -> bool:
+    if block.bbox.y1 < config.detection.crop_top_margin:
+        return False
+    if block.bbox.y0 > page_height - config.detection.bottom_margin:
+        return False
+    return _is_sparse_lower_region_keep_block(block.text)
+
+
+def _is_sparse_lower_region_signal(text: str) -> bool:
+    cleaned = _normalized_ocr_text(text)
+    if not cleaned:
+        return False
+    if re.match(r"^\s*(?:\d+\s+(?:\([a-zivxlcdm]+\)\s*)?\S|\([a-zivxlcdm]+\)\s+\S)", cleaned, re.IGNORECASE):
+        return True
+    if re.search(r"\[\d{1,2}\]", cleaned):
+        return True
+    return sum(1 for char in cleaned if char.isalpha()) >= 8
+
+
+def _is_sparse_lower_region_keep_block(text: str) -> bool:
+    cleaned = _normalized_ocr_text(text)
+    if not cleaned:
+        return False
+    if re.search(
+        r"WRITE IN THIS MARGIN|DO NOT W(?:RITE)?|©\s*UCLES|Cambridge International|Turn over",
+        cleaned,
+        re.IGNORECASE,
+    ):
+        return False
+    if re.fullmatch(r"[._\-–—=\s]{4,}", cleaned):
+        return False
+    alpha_numeric = sum(1 for char in cleaned if char.isalnum())
+    if alpha_numeric >= 2:
+        return True
+    return bool(
+        re.search(r"^\s*(?:\d+\s+(?:\([a-zivxlcdm]+\)\s*)?\S|\([a-zivxlcdm]+\)\s+\S)", cleaned, re.IGNORECASE)
+        or re.search(r"\[\d{1,2}\]", cleaned)
+    )
+
+
+def _normalized_ocr_text(text: str) -> str:
+    return " ".join(str(text).replace("\u00a0", " ").split())
+
+
+def _existing_block_should_yield_to_ocr(block: TextBlock) -> bool:
+    cleaned = _normalized_ocr_text(block.text)
+    height = max(0.0, block.bbox.y1 - block.bbox.y0)
+    if height >= 160:
+        return True
+    if re.search(r"WRITE IN THIS MARGIN|©\s*UCLES|Cambridge International|Turn over", cleaned, re.IGNORECASE):
+        return True
+    if re.fullmatch(r"[._\-–—=\s]{8,}", cleaned):
+        return True
+    return False
+
+
+def _normalize_ocr_block_text(text: str) -> str:
+    normalized = _normalized_ocr_text(text)
+    normalized = re.sub(r"\{(\d{1,2})\]", r"[\1]", normalized)
+    normalized = re.sub(r"\[(\d{1,2})\}", r"[\1]", normalized)
+    normalized = re.sub(r"\((\d{1,2})\]", r"[\1]", normalized)
+    normalized = re.sub(r"\[(\d{1,2})\)", r"[\1]", normalized)
+    return normalized
+
+
+def _ocr_page(
+    page: Any,
+    page_number: int,
+    config: AppConfig,
+    *,
+    clip: Any | None = None,
+    context: str = "ocr_page",
+) -> list[TextBlock]:
     try:
         import fitz
         import pytesseract
@@ -402,7 +559,8 @@ def _ocr_page(page: Any, page_number: int, config: AppConfig) -> list[TextBlock]
         dpi=config.ocr.dpi,
         source_file=getattr(page.parent, "name", "<pdf>"),
         page_number=page_number,
-        context="ocr_page",
+        context=context,
+        clip=clip,
     )
     data = pytesseract.image_to_data(
         image,
@@ -433,12 +591,13 @@ def _ocr_page(page: Any, page_number: int, config: AppConfig) -> list[TextBlock]
             )
         )
 
-    scale_x = float(page.rect.width) / image.width
-    scale_y = float(page.rect.height) / image.height
+    clip_rect = fitz.Rect(clip) if clip is not None else fitz.Rect(page.rect)
+    scale_x = float(clip_rect.width) / image.width
+    scale_y = float(clip_rect.height) / image.height
     blocks: list[TextBlock] = []
     for words in grouped.values():
         words.sort(key=lambda item: item[1])
-        text = " ".join(item[0] for item in words)
+        text = _normalize_ocr_block_text(" ".join(item[0] for item in words))
         left = min(item[1] for item in words)
         top = min(item[2] for item in words)
         right = max(item[1] + item[3] for item in words)
@@ -449,7 +608,12 @@ def _ocr_page(page: Any, page_number: int, config: AppConfig) -> list[TextBlock]
             TextBlock(
                 page_number=page_number,
                 text=text,
-                bbox=BoundingBox(left * scale_x, top * scale_y, right * scale_x, bottom * scale_y),
+                bbox=BoundingBox(
+                    float(clip_rect.x0) + left * scale_x,
+                    float(clip_rect.y0) + top * scale_y,
+                    float(clip_rect.x0) + right * scale_x,
+                    float(clip_rect.y0) + bottom * scale_y,
+                ),
                 source="ocr",
                 confidence=avg_confidence,
             )
@@ -458,14 +622,19 @@ def _ocr_page(page: Any, page_number: int, config: AppConfig) -> list[TextBlock]
     if blocks:
         return sorted(blocks, key=lambda block: (block.bbox.y0, block.bbox.x0))
 
-    text = pytesseract.image_to_string(image, lang=config.ocr.language).strip()
+    text = _normalize_ocr_block_text(pytesseract.image_to_string(image, lang=config.ocr.language).strip())
     if not text:
         return []
     return [
         TextBlock(
             page_number=page_number,
             text=text,
-            bbox=BoundingBox(0, 0, float(page.rect.width), float(page.rect.height)),
+            bbox=BoundingBox(
+                float(clip_rect.x0),
+                float(clip_rect.y0),
+                float(clip_rect.x1),
+                float(clip_rect.y1),
+            ),
             source="ocr",
             confidence=None,
         )

@@ -23,7 +23,7 @@ from exam_bank.mark_schemes import (
 )
 from exam_bank.models import BoundingBox, PageLayout, QuestionRecord, TextBlock
 from exam_bank.pipeline import _question_subparts_from_span, _question_subparts_from_text
-from exam_bank.question_detection import detect_question_spans, extract_marks_from_text, parse_question_start
+from exam_bank.question_detection import detect_question_spans, extract_marks_from_text, extract_question_total_from_text, parse_question_start
 
 
 def block(page: int, text: str, y: float, x: float = 50) -> TextBlock:
@@ -78,6 +78,101 @@ def test_detect_question_spans_groups_subparts_under_top_level_question() -> Non
     assert "2 Differentiate" not in spans[0].combined_text
 
 
+def test_detect_question_spans_splits_same_page_secondary_question_anchor() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "2 Differentiate y = x^3. [3]", 100),
+            block(1, "Find the gradient when x = 2.", 132, x=72),
+            block(1, "3 Solve the equation x^2 - 5x + 6 = 0. [4]", 430),
+        ],
+    )
+
+    spans = detect_question_spans([layout], Path("paper_qp.pdf"), config)
+
+    assert [span.question_number for span in spans] == ["2", "3"]
+    assert "3 Solve the equation" not in spans[0].combined_text
+    assert "same_page_secondary_anchor_detected" in spans[0].review_flags
+    assert "same_page_split_performed" in spans[0].review_flags
+
+
+def test_detect_question_spans_splits_after_large_answer_space_before_new_question() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "4 State the value of k. [2]", 95),
+            block(1, "........................................", 150, x=72),
+            block(1, "........................................", 178, x=72),
+            block(1, "........................................", 206, x=72),
+            block(1, "........................................", 234, x=72),
+            block(1, "5 Sketch the graph of y = sin x for 0 <= x <= 2pi. [3]", 470),
+        ],
+    )
+
+    spans = detect_question_spans([layout], Path("paper_qp.pdf"), config)
+
+    assert [span.question_number for span in spans] == ["4", "5"]
+    assert "5 Sketch the graph" not in spans[0].combined_text
+
+
+def test_detect_question_spans_does_not_false_split_single_question_spanning_page() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "6 The curve C has equation y = x^3 - 3x + 1.", 100),
+            block(1, "Find the coordinates of the stationary points of C.", 165, x=72),
+            block(1, "Hence determine the nature of each stationary point. [5]", 430, x=72),
+        ],
+    )
+
+    spans = detect_question_spans([layout], Path("paper_qp.pdf"), config)
+
+    assert len(spans) == 1
+    assert spans[0].question_number == "6"
+    assert "Hence determine the nature" in spans[0].combined_text
+
+
+def test_detect_question_spans_preserves_lower_same_page_multipart_continuation() -> None:
+    config = AppConfig()
+    layouts = [
+        PageLayout(
+            page_number=1,
+            width=595,
+            height=842,
+            blocks=[
+                block(1, "5 (a) Find the exact value of cos 60°. [1]", 100),
+                block(1, "........................................", 160, x=72),
+                block(1, "........................................", 188, x=72),
+                block(1, "........................................", 216, x=72),
+                block(1, "(b) Hence find the exact value of sin 30°. [1]", 450, x=72),
+            ],
+        ),
+        PageLayout(
+            page_number=2,
+            width=595,
+            height=842,
+            blocks=[
+                block(2, "6 Next question. [3]", 100),
+            ],
+        ),
+    ]
+
+    spans = detect_question_spans(layouts, Path("paper_qp.pdf"), config)
+
+    assert [span.question_number for span in spans] == ["5", "6"]
+    assert spans[0].structure_detected["subparts"] == ["a", "b"]
+    assert "6 Next question" not in spans[0].combined_text
+
+
 def test_detect_question_spans_rescue_subpart_from_mixed_page_furniture_on_continuation_page() -> None:
     config = AppConfig()
     layouts = [
@@ -128,6 +223,270 @@ def test_detect_question_spans_flags_gap_when_middle_subpart_is_missing() -> Non
     assert span.full_question_label == "7(a),(c)"
     assert "question_subpart_sequence_gap" in span.review_flags
     assert "question_scope_incomplete" in span.review_flags
+    assert "impossible_subpart_sequence_detected" in span.review_flags
+    assert "question_subparts_incomplete" in span.validation_flags
+    assert span.structure_detected["missing_internal_subparts"] == ["b"]
+    assert span.structure_detected["impossible_subpart_sequence_detected"] is True
+
+
+def test_detect_question_spans_flags_roman_gap_when_middle_subpart_is_missing() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "8 (i) First part. [2]", 100),
+            block(1, "(iii) Third part. [4]", 180, x=72),
+            block(1, "9 Next question. [3]", 260),
+        ],
+    )
+
+    span = detect_question_spans([layout], Path("paper_qp.pdf"), config)[0]
+
+    assert "question_subpart_sequence_gap" in span.review_flags
+    assert "impossible_subpart_sequence_detected" in span.review_flags
+    assert "question_subparts_incomplete" in span.validation_flags
+    assert span.structure_detected["missing_internal_subparts"] == ["ii"]
+    assert span.structure_detected["impossible_subpart_sequence_detected"] is True
+
+
+def test_detect_question_spans_flags_single_first_subpart_without_end_evidence() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "4 (a) State the value of k.", 100),
+            block(1, "5 Next question. [3]", 220),
+        ],
+    )
+
+    span = detect_question_spans([layout], Path("paper_qp.pdf"), config)[0]
+
+    assert "question_subparts_incomplete" in span.validation_flags
+    assert "missing_terminal_mark_total" in span.validation_flags
+
+
+def test_detect_question_spans_does_not_false_positive_genuine_single_part_question() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "4 (a) State the value of k. [2]", 100),
+            block(1, "5 Next question. [3]", 220),
+        ],
+    )
+
+    span = detect_question_spans([layout], Path("paper_qp.pdf"), config)[0]
+
+    assert "question_subparts_incomplete" not in span.validation_flags
+    assert "missing_terminal_mark_total" not in span.validation_flags
+
+
+def test_detect_question_spans_flags_roman_singleton_without_ii() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "8 (i) Show that the gradient is 3.", 100),
+            block(1, "9 Next question. [4]", 220),
+        ],
+    )
+
+    span = detect_question_spans([layout], Path("paper_qp.pdf"), config)[0]
+
+    assert "question_subparts_incomplete" in span.validation_flags
+
+
+def test_detect_question_spans_flags_weak_nearly_empty_anchor() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "6", 100),
+            block(1, "7 Next question. [4]", 220),
+        ],
+    )
+
+    span = detect_question_spans([layout], Path("paper_qp.pdf"), config)[0]
+
+    assert "weak_question_anchor" in span.validation_flags
+    assert "likely_truncated_question_crop" in span.validation_flags
+
+
+def test_detect_question_spans_recovers_nearby_missing_continuation_block() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "3 (a) Solve the equation.", 100),
+            block(1, "© UCLES 2025 (b) Hence find the other root. [2]", 145),
+            block(1, "4 Next question. [3]", 250),
+        ],
+    )
+
+    span = detect_question_spans([layout], Path("9709 Mathematics June 2025 Question paper  12.pdf"), config)[0]
+
+    assert "(b) Hence find the other root. [2]" in span.combined_text
+    assert "question_subparts_incomplete" not in span.validation_flags
+    assert span.recovery_result in {"improved", "not_needed"}
+
+
+def test_detect_question_spans_newer_format_stops_before_foreign_top_continuation() -> None:
+    config = AppConfig()
+    layouts = [
+        PageLayout(
+            page_number=1,
+            width=595,
+            height=842,
+            blocks=[
+                block(1, "2 A fair six-sided dice is thrown repeatedly until a 6 is obtained.", 90),
+                block(1, "(a) Find the probability that a 6 is obtained on the 8th throw. [1]", 120, x=72),
+                block(1, "(b) Find the probability that a 6 is obtained for the third time on the 7th throw. [3]", 155, x=72),
+            ],
+        ),
+        PageLayout(
+            page_number=2,
+            width=595,
+            height=842,
+            blocks=[
+                block(2, "(b) Find the mean annual salary of these employees. ....................................................................", 32, x=72),
+                block(2, "3 Next question. [4]", 220),
+            ],
+        ),
+    ]
+
+    span = detect_question_spans(layouts, Path("9709 Mathematics November 2025 Question Paper  51.pdf"), config)[0]
+
+    assert "annual salary" not in span.combined_text
+    assert "newer_format_scope_stop_before_foreign_continuation" in span.review_flags
+    assert "question_scope_contaminated" not in span.validation_flags
+
+
+def test_detect_question_spans_stops_before_next_anchor_after_complete_question() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "3 Kai has a spinner with four sides labelled 1, 2, 3, 4.", 90),
+            block(1, "(a) Find Var(X). [4]", 120, x=72),
+            block(1, "(b) Find the probability that a score of 2 is obtained fewer than 8 times. [3]", 160, x=72),
+            block(1, "4 Priti has two bags of discs. [2]", 250),
+        ],
+    )
+
+    span = detect_question_spans([layout], Path("9709 Mathematics November 2025 Question Paper  55.pdf"), config)[0]
+
+    assert "Priti has two bags of discs" not in span.combined_text
+    assert span.question_total_detected == 7
+
+
+def test_detect_question_spans_keeps_valid_top_continuation_with_same_topic() -> None:
+    config = AppConfig()
+    layouts = [
+        PageLayout(
+            page_number=1,
+            width=595,
+            height=842,
+            blocks=[
+                block(1, "4 The heights of players from Pelicans and Swans are given in the table.", 90),
+                block(1, "(a) Draw a back-to-back stem-and-leaf diagram for Pelicans and Swans. [4]", 140, x=72),
+            ],
+        ),
+        PageLayout(
+            page_number=2,
+            width=595,
+            height=842,
+            blocks=[
+                block(2, "(d) Make one comparison between the heights of the Pelicans players and the heights of the Swans players. ....................................................................", 32, x=72),
+                block(2, "(b) Find the median and the interquartile range of the heights of the Pelicans. [3]", 90, x=72),
+                block(2, "(c) Represent the data by a pair of box-and-whisker plots. [3]", 150, x=72),
+                block(2, "5 Next question. [2]", 250),
+            ],
+        ),
+    ]
+
+    span = detect_question_spans(layouts, Path("9709 Mathematics November 2025 Question Paper  55.pdf"), config)[0]
+
+    assert "comparison between the heights" in span.combined_text
+    assert "(b) Find the median" in span.combined_text
+    assert "question_scope_contaminated" not in span.validation_flags
+
+
+def test_detect_question_spans_flags_mixed_question_scope_contamination() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "2 A fair six-sided dice is thrown repeatedly until a 6 is obtained.", 90),
+            block(1, "(a) Find the probability that a 6 is obtained on the 8th throw. [1]", 120, x=72),
+            block(1, "(b) Find the probability that a 6 is obtained for the third time on the 7th throw. [3]", 155, x=72),
+            block(1, "(b) Find the mean and standard deviation of the annual salaries of these 54 employees.", 205, x=72),
+            block(1, "....................................................................................................", 235, x=72),
+            block(1, "3 Next question. [4]", 300),
+        ],
+    )
+
+    span = detect_question_spans([layout], Path("9709 Mathematics November 2025 Question Paper  51.pdf"), config)[0]
+
+    assert "question_scope_contaminated" in span.validation_flags
+    assert span.structure_detected["contamination_detected"] is True
+
+
+def test_detect_question_spans_flags_answer_space_contamination() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "4 Complete the tree diagram for the bag experiment.", 90),
+            block(1, "(a) Complete the tree diagram below by entering all the remaining outcomes and probabilities. [3]", 120, x=72),
+            block(1, "(b) Find the mean annual salary of these employees. DO NOT WRITE IN THIS MARGIN ....................................................................................................", 190, x=72),
+            block(1, "5 Next question. [2]", 300),
+        ],
+    )
+
+    span = detect_question_spans([layout], Path("9709 Mathematics November 2025 Question Paper  51.pdf"), config)[0]
+
+    assert "question_scope_contaminated" in span.validation_flags
+    assert span.structure_detected["contamination_indicators"]["filler_line_count"] >= 1
+
+
+def test_detect_question_spans_does_not_false_flag_valid_long_multipart_question_as_contaminated() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=1,
+        width=595,
+        height=842,
+        blocks=[
+            block(1, "3 Priti has two bags of discs, X and Y.", 90),
+            block(1, "Bag X contains 8 red discs and 7 blue discs.", 120, x=72),
+            block(1, "Bag Y contains 6 red discs and 9 blue discs.", 145, x=72),
+            block(1, "(a) Draw a tree diagram to represent this information. [2]", 180, x=72),
+            block(1, "(b) Find the probability that the two discs chosen are blue. [2]", 215, x=72),
+            block(1, "(c) Find the conditional probability that at least one disc is red. [4]", 250, x=72),
+            block(1, "4 Next question. [3]", 330),
+        ],
+    )
+
+    span = detect_question_spans([layout], Path("9709 Mathematics November 2025 Question Paper  55.pdf"), config)[0]
+
+    assert "question_scope_contaminated" not in span.validation_flags
 
 
 def test_detect_question_spans_excludes_previous_tail_and_centered_page_number_from_new_question() -> None:
@@ -248,6 +607,7 @@ def test_detect_question_spans_preserves_out_of_order_top_continuation_on_contin
 def test_extract_marks_sums_bracketed_marks() -> None:
     assert extract_marks_from_text("Find x. [2]\nHence find y. [3]") == 5
     assert extract_marks_from_text("No mark shown") is None
+    assert extract_question_total_from_text("Find x. [2]\nHence find y. [3]\n[5]") == 5
 
 
 def test_question_subparts_from_span_preserves_multiline_middle_parts() -> None:
@@ -587,8 +947,8 @@ def test_mark_scheme_mapping_rejects_missing_subpart_and_marks_mismatch() -> Non
     )
 
     assert mark_total == 2
-    assert validation_flags == ["missing_subparts"]
-    assert reason == "missing_subparts"
+    assert validation_flags == ["mark_scheme_part_structure_mismatch"]
+    assert reason == "mark_scheme_part_structure_mismatch"
 
     validation_flags, reason = _validate_mark_scheme_mapping(
         "5",
@@ -602,8 +962,8 @@ def test_mark_scheme_mapping_rejects_missing_subpart_and_marks_mismatch() -> Non
         flags,
     )
 
-    assert validation_flags == ["marks_total_mismatch"]
-    assert reason == "marks_total_mismatch"
+    assert validation_flags == ["question_mark_total_mismatch"]
+    assert reason == "question_mark_total_mismatch"
 
 
 def test_mark_scheme_mapping_rejects_question_scope_smaller_than_markscheme_scope() -> None:
@@ -646,6 +1006,181 @@ def test_mark_scheme_mapping_rejects_question_scope_smaller_than_markscheme_scop
 
     assert validation_flags == ["question_subparts_incomplete"]
     assert reason == "question_subparts_incomplete"
+
+
+def test_mark_scheme_mapping_prioritizes_subparts_mismatch_over_weak_anchor() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=6,
+        width=595,
+        height=842,
+        blocks=[
+            cell(6, "Question", 100, x=45, width=55),
+            cell(6, "Answer", 100, x=130, width=50),
+            cell(6, "Marks", 100, x=390, width=45),
+            cell(6, "Guidance", 100, x=455, width=65),
+            cell(6, "5(a)", 135, x=50, width=35),
+            cell(6, "Part a answer", 135, x=130, width=100),
+            cell(6, "B1", 135, x=390, width=25),
+            cell(6, "5(b)", 170, x=50, width=35),
+            cell(6, "Part b answer", 170, x=130, width=100),
+            cell(6, "M1", 170, x=390, width=25),
+            cell(6, "5(c)", 205, x=50, width=35),
+            cell(6, "Part c answer", 205, x=130, width=100),
+            cell(6, "A1", 205, x=390, width=25),
+            cell(6, "6", 250, x=50, width=10),
+            cell(6, "Next question", 250, x=130, width=100),
+        ],
+    )
+
+    tables = _detect_mark_scheme_tables([layout], config)
+    anchors = _detect_table_question_anchors([layout], tables, config, ["5", "6"])
+    regions, flags = _table_regions_for_anchor([layout], tables, anchors[0], anchors[-1], config)
+
+    validation_flags, reason = _validate_mark_scheme_mapping(
+        "5",
+        ["a"],
+        ["a", "b", "c"],
+        3,
+        6,
+        anchors[0],
+        anchors[-1],
+        regions,
+        flags,
+        question_validation_flags=["weak_question_anchor"],
+    )
+
+    assert validation_flags == ["question_subparts_incomplete"]
+    assert reason == "question_subparts_incomplete"
+
+
+def test_mark_scheme_mapping_prioritizes_total_mismatch_over_weak_anchor() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=6,
+        width=595,
+        height=842,
+        blocks=[
+            cell(6, "Question", 100, x=45, width=55),
+            cell(6, "Answer", 100, x=130, width=50),
+            cell(6, "Marks", 100, x=390, width=45),
+            cell(6, "Guidance", 100, x=455, width=65),
+            cell(6, "3(a)", 135, x=50, width=35),
+            cell(6, "Part a answer", 135, x=130, width=100),
+            cell(6, "B1", 135, x=390, width=25),
+            cell(6, "3(b)", 170, x=50, width=35),
+            cell(6, "Part b answer", 170, x=130, width=100),
+            cell(6, "M1 A1", 170, x=390, width=45),
+            cell(6, "4", 220, x=50, width=10),
+            cell(6, "Next question", 220, x=130, width=100),
+        ],
+    )
+
+    tables = _detect_mark_scheme_tables([layout], config)
+    anchors = _detect_table_question_anchors([layout], tables, config, ["3", "4"])
+    regions, flags = _table_regions_for_anchor([layout], tables, anchors[0], anchors[-1], config)
+
+    validation_flags, reason = _validate_mark_scheme_mapping(
+        "3",
+        ["a", "b"],
+        ["a", "b"],
+        2,
+        3,
+        anchors[0],
+        anchors[-1],
+        regions,
+        flags,
+        question_validation_flags=["weak_question_anchor"],
+    )
+
+    assert validation_flags == ["question_mark_total_mismatch"]
+    assert reason == "question_mark_total_mismatch"
+
+
+def test_mark_scheme_mapping_keeps_weak_anchor_when_no_stronger_structure_mismatch_exists() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=6,
+        width=595,
+        height=842,
+        blocks=[
+            cell(6, "Question", 100, x=45, width=55),
+            cell(6, "Answer", 100, x=130, width=50),
+            cell(6, "Marks", 100, x=390, width=45),
+            cell(6, "Guidance", 100, x=455, width=65),
+            cell(6, "9(a)", 135, x=50, width=35),
+            cell(6, "Part a answer", 135, x=130, width=100),
+            cell(6, "B1", 135, x=390, width=25),
+            cell(6, "9(b)", 170, x=50, width=35),
+            cell(6, "Part b answer", 170, x=130, width=100),
+            cell(6, "M1", 170, x=390, width=25),
+            cell(6, "10", 220, x=50, width=10),
+            cell(6, "Next question", 220, x=130, width=100),
+        ],
+    )
+
+    tables = _detect_mark_scheme_tables([layout], config)
+    anchors = _detect_table_question_anchors([layout], tables, config, ["9", "10"])
+    regions, flags = _table_regions_for_anchor([layout], tables, anchors[0], anchors[-1], config)
+
+    validation_flags, reason = _validate_mark_scheme_mapping(
+        "9",
+        ["a", "b"],
+        ["a", "b"],
+        2,
+        2,
+        anchors[0],
+        anchors[-1],
+        regions,
+        flags,
+        question_validation_flags=["weak_question_anchor"],
+    )
+
+    assert validation_flags == ["weak_question_anchor"]
+    assert reason == "weak_question_anchor"
+
+
+def test_mark_scheme_mapping_rejects_missing_terminal_total_when_question_validation_flags_it() -> None:
+    config = AppConfig()
+    layout = PageLayout(
+        page_number=6,
+        width=595,
+        height=842,
+        blocks=[
+            cell(6, "Question", 100, x=45, width=55),
+            cell(6, "Answer", 100, x=130, width=50),
+            cell(6, "Marks", 100, x=390, width=45),
+            cell(6, "Guidance", 100, x=455, width=65),
+            cell(6, "7(a)", 135, x=50, width=35),
+            cell(6, "Part a answer", 135, x=130, width=100),
+            cell(6, "B1", 135, x=390, width=25),
+            cell(6, "7(b)", 170, x=50, width=35),
+            cell(6, "Part b answer", 170, x=130, width=100),
+            cell(6, "M1", 170, x=390, width=25),
+            cell(6, "8", 220, x=50, width=10),
+            cell(6, "Next question", 220, x=130, width=100),
+        ],
+    )
+
+    tables = _detect_mark_scheme_tables([layout], config)
+    anchors = _detect_table_question_anchors([layout], tables, config, ["7", "8"])
+    regions, flags = _table_regions_for_anchor([layout], tables, anchors[0], anchors[-1], config)
+
+    validation_flags, reason = _validate_mark_scheme_mapping(
+        "7",
+        ["a", "b"],
+        ["a", "b"],
+        2,
+        2,
+        anchors[0],
+        anchors[-1],
+        regions,
+        flags,
+        question_validation_flags=["missing_terminal_mark_total"],
+    )
+
+    assert validation_flags == ["missing_terminal_mark_total"]
+    assert reason == "missing_terminal_mark_total"
 
 
 def test_mark_scheme_mark_total_sums_standalone_subpart_totals_after_alternatives() -> None:
