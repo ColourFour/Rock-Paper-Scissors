@@ -33,6 +33,9 @@ jobs:
           mkdir -p _site
           cp index.html _site/index.html
           touch _site/.nojekyll
+          if [ -d assets ]; then
+            cp -R assets _site/assets
+          fi
           if [ -d practice ]; then
             cp -R practice _site/practice
           fi

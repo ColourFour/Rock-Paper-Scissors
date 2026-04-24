@@ -98,6 +98,13 @@
         height: auto;
       }
 
+      .art img {
+        display: block;
+        width: 100%;
+        height: auto;
+        border-radius: 24px;
+      }
+
       .cards {
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -172,25 +179,7 @@
           <p class="intro">Pick a paper, try one question at a time, then reveal the mark scheme when you are ready. Keep it simple: attempt first, check after.</p>
         </div>
         <div class="art" aria-label="Encouraging maths illustration">
-          <svg viewBox="0 0 520 420" role="img" aria-labelledby="art-title">
-            <title id="art-title">A cheerful desk with maths notes, a pencil, and a rising sun</title>
-            <defs>
-              <linearGradient id="sun" x1="0" x2="1">
-                <stop offset="0" stop-color="#ffcf6b"/>
-                <stop offset="1" stop-color="#de8b2c"/>
-              </linearGradient>
-            </defs>
-            <rect width="520" height="420" rx="34" fill="#fff7e8"/>
-            <circle cx="405" cy="94" r="58" fill="url(#sun)"/>
-            <path d="M74 286c64-86 121-87 171-23 41 51 86 48 132-4 28-32 55-45 82-38" fill="none" stroke="#0d695f" stroke-width="16" stroke-linecap="round"/>
-            <rect x="82" y="122" width="228" height="164" rx="18" fill="#ffffff" stroke="#d8c8aa" stroke-width="4"/>
-            <path d="M116 164h154M116 202h116M116 240h148" stroke="#245c87" stroke-width="9" stroke-linecap="round"/>
-            <path d="M350 246l74 74" stroke="#151711" stroke-width="18" stroke-linecap="round"/>
-            <path d="M330 224l42-42 74 74-42 42z" fill="#f6b24b" stroke="#151711" stroke-width="8" stroke-linejoin="round"/>
-            <path d="M372 182l24-24 74 74-24 24z" fill="#0d695f" stroke="#151711" stroke-width="8" stroke-linejoin="round"/>
-            <text x="112" y="86" fill="#151711" font-family="Georgia, serif" font-size="34" font-weight="700">x^2 + y^2</text>
-            <text x="328" y="362" fill="#0d695f" font-family="Avenir Next, sans-serif" font-size="26" font-weight="800">You have this.</text>
-          </svg>
+          <img src="assets/caie-math-review-hero.png" alt="Friendly math illustration saying You've got this">
         </div>
       </section>
 
