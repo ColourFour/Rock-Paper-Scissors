@@ -32,7 +32,7 @@ brew install tesseract
 
 ## Run
 
-The supported front door is:
+The supported extraction front door is:
 
 ```bash
 python -m exam_bank.cli process --input input --output output
@@ -50,6 +50,37 @@ input/
 or a single mixed folder containing question paper PDFs and mark scheme PDFs.
 
 The active runtime does not support legacy QA, review, practice, or topic-PDF commands.
+
+Optional DeepSeek enrichment is a separate sidecar step. It does not change extraction and it does not mutate `question_bank.json`.
+
+Set the API key in your environment:
+
+```bash
+export DEEPSEEK_API_KEY=...
+```
+
+Then run the enrichment pass against the exported bank:
+
+```bash
+python -m exam_bank.deepseek_enrich \
+  --input output/json/question_bank.json \
+  --output output/json/question_bank.deepseek.json \
+  --limit 25
+```
+
+Useful options:
+
+- `--question-ids 12spring24_q01 12spring24_q06`
+- `--paper-family p1`
+- `--dry-run`
+- `--failure-log output/json/question_bank.deepseek.failures.jsonl`
+
+The DeepSeek sidecar keeps the raw model suggestion and adds Stage 2 reconciliation fields such as normalized topic/difficulty labels, local-vs-DeepSeek match status, and final review gating:
+
+```text
+output/json/question_bank.deepseek.json
+output/json/question_bank.deepseek.failures.jsonl   # only when failures occur
+```
 
 ## Output
 

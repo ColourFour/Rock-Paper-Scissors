@@ -83,3 +83,11 @@ def test_document_registry_can_filter_archived_document_types(tmp_path: Path) ->
     assert entry.mark_scheme == ms
     assert entry.examiner_reports == []
     assert registry.session_reports == {}
+
+
+def test_checked_in_config_yaml_loads_with_current_schema() -> None:
+    config = load_config(Path("config.yaml"))
+
+    assert config.classification.enable_openai is False
+    assert config.classification.openai_model == "gpt-5-mini"
+    assert config.classification.openai_timeout_seconds == 30

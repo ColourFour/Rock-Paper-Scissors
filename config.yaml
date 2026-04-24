@@ -47,10 +47,9 @@ naming:
   json_name: question_bank.json
 
 classification:
-  enabled: true
-  provider: deepseek
-  model: deepseek-chat
-  timeout_seconds: 30
+  enable_openai: false
+  openai_model: gpt-5-mini
+  openai_timeout_seconds: 30
   uncertainty_threshold: 0.55
 
 debug:

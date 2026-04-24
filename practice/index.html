@@ -1,0 +1,542 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CAIE 9709 Practice</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --paper: #fbf4e5;
+        --ink: #151711;
+        --muted: #696452;
+        --line: rgba(35, 30, 21, 0.14);
+        --card: rgba(255, 253, 246, 0.88);
+        --strong: #fffdf6;
+        --green: #0d695f;
+        --green-dark: #083f3a;
+        --orange: #de8b2c;
+        --shadow: 0 24px 80px rgba(48, 35, 18, 0.16);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at top left, rgba(222, 139, 44, 0.22), transparent 30rem),
+          radial-gradient(circle at 82% 8%, rgba(13, 105, 95, 0.16), transparent 30rem),
+          linear-gradient(135deg, #f4e5cc 0%, var(--paper) 48%, #edf4e9 100%);
+        color: var(--ink);
+        font-family: "Avenir Next", "Gill Sans", "Trebuchet MS", sans-serif;
+      }
+
+      button,
+      select {
+        font: inherit;
+      }
+
+      .topbar {
+        position: sticky;
+        z-index: 5;
+        top: 0;
+        border-bottom: 1px solid var(--line);
+        background: rgba(251, 244, 229, 0.88);
+        backdrop-filter: blur(14px);
+      }
+
+      .nav {
+        display: grid;
+        grid-template-columns: auto minmax(170px, 1fr) minmax(150px, auto) minmax(170px, auto) minmax(130px, auto) auto auto;
+        gap: 12px;
+        align-items: center;
+        width: min(1260px, calc(100% - 28px));
+        margin: 0 auto;
+        padding: 12px 0;
+      }
+
+      .home {
+        border-radius: 999px;
+        color: var(--green-dark);
+        font-weight: 900;
+        text-decoration: none;
+      }
+
+      .title {
+        min-width: 0;
+        font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+        font-size: clamp(22px, 3vw, 34px);
+        font-weight: 700;
+        letter-spacing: -0.04em;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      select {
+        min-height: 42px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--strong);
+        color: var(--ink);
+        padding: 0 14px;
+      }
+
+      button {
+        min-height: 42px;
+        border: 0;
+        border-radius: 999px;
+        cursor: pointer;
+        font-weight: 900;
+        padding: 0 16px;
+      }
+
+      .primary {
+        background: var(--green);
+        color: white;
+      }
+
+      .primary:hover {
+        background: var(--green-dark);
+      }
+
+      .secondary {
+        border: 1px solid var(--line);
+        background: var(--strong);
+        color: var(--ink);
+      }
+
+      .shell {
+        width: min(1260px, calc(100% - 28px));
+        margin: 0 auto;
+        padding: 24px 0 56px;
+      }
+
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+
+      .pill {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: rgba(255, 253, 246, 0.72);
+        color: var(--muted);
+        padding: 8px 12px;
+        font-size: 14px;
+        font-weight: 800;
+      }
+
+      .viewer {
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 30px;
+        background: var(--card);
+        box-shadow: var(--shadow);
+      }
+
+      .viewer-head {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--line);
+        padding: 18px 20px;
+      }
+
+      h1 {
+        margin: 0;
+        font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+        font-size: clamp(28px, 4vw, 48px);
+        letter-spacing: -0.045em;
+      }
+
+      .status {
+        padding: 28px;
+        color: var(--muted);
+      }
+
+      .status.error {
+        color: #9d2f1d;
+      }
+
+      .image-wrap {
+        padding: 18px;
+      }
+
+      .image-frame {
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        background: white;
+      }
+
+      .image-frame img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+
+      .solution {
+        display: none;
+        border-top: 1px solid var(--line);
+      }
+
+      .solution.visible {
+        display: block;
+      }
+
+      .solution-label {
+        margin: 0;
+        padding: 18px 20px 0;
+        color: var(--green-dark);
+        font-size: 13px;
+        font-weight: 900;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      @media (max-width: 900px) {
+        .nav {
+          grid-template-columns: 1fr 1fr;
+        }
+
+        .title {
+          grid-column: 1 / -1;
+          grid-row: 1;
+        }
+
+        .home {
+          grid-row: 2;
+        }
+      }
+
+      @media (max-width: 620px) {
+        .nav {
+          grid-template-columns: 1fr;
+        }
+
+        .title,
+        .home {
+          grid-column: auto;
+          grid-row: auto;
+        }
+
+        button,
+        select {
+          width: 100%;
+        }
+
+        .viewer-head {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <nav class="nav" aria-label="Practice controls">
+        <a class="home" href="../">Back home</a>
+        <div class="title" id="paper-family-title">Practice</div>
+        <select id="paper-select" aria-label="Choose a paper">
+          <option value="all">All papers</option>
+        </select>
+        <select id="topic-select" aria-label="Choose a topic">
+          <option value="all">All topics</option>
+        </select>
+        <select id="question-select" aria-label="Choose a question number">
+          <option value="all">Any question</option>
+        </select>
+        <button class="secondary" id="random-question" type="button">Random question</button>
+        <button class="primary" id="next-question" type="button">Next question</button>
+      </nav>
+    </header>
+
+    <main class="shell">
+      <section class="meta" aria-label="Current question details">
+        <span class="pill" id="current-paper">Paper: ...</span>
+        <span class="pill" id="current-question">Question: ...</span>
+        <span class="pill" id="current-topic">Topic: ...</span>
+        <span class="pill" id="current-marks">Marks: ...</span>
+      </section>
+
+      <section class="viewer" aria-live="polite">
+        <div id="status" class="status">Loading practice questions...</div>
+        <div id="question-card" hidden>
+          <div class="viewer-head">
+            <h1 id="question-title">Question</h1>
+            <button class="primary" id="check-solution" type="button">Check solution</button>
+          </div>
+          <div class="image-wrap">
+            <div class="image-frame">
+              <img id="question-image" alt="Question image">
+            </div>
+          </div>
+          <div class="solution" id="solution">
+            <p class="solution-label">Mark scheme</p>
+            <div class="image-wrap">
+              <div class="image-frame">
+                <img id="solution-image" alt="Mark scheme image">
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const familyNames = {
+        p1: "Pure Mathematics 1",
+        p3: "Pure Mathematics 3",
+        p4: "Mechanics",
+        p5: "Statistics",
+      };
+
+      const params = new URLSearchParams(window.location.search);
+      const initialFamily = familyNames[params.get("family")] ? params.get("family") : "p1";
+
+      const state = {
+        allQuestions: [],
+        family: initialFamily,
+        pool: [],
+        index: 0,
+        current: null,
+        solutionVisible: false,
+      };
+
+      const elements = {
+        title: document.querySelector("#paper-family-title"),
+        paperSelect: document.querySelector("#paper-select"),
+        topicSelect: document.querySelector("#topic-select"),
+        questionSelect: document.querySelector("#question-select"),
+        randomQuestion: document.querySelector("#random-question"),
+        nextQuestion: document.querySelector("#next-question"),
+        checkSolution: document.querySelector("#check-solution"),
+        status: document.querySelector("#status"),
+        card: document.querySelector("#question-card"),
+        questionTitle: document.querySelector("#question-title"),
+        questionImage: document.querySelector("#question-image"),
+        solution: document.querySelector("#solution"),
+        solutionImage: document.querySelector("#solution-image"),
+        currentPaper: document.querySelector("#current-paper"),
+        currentQuestion: document.querySelector("#current-question"),
+        currentTopic: document.querySelector("#current-topic"),
+        currentMarks: document.querySelector("#current-marks"),
+      };
+
+      async function loadManifest() {
+        const response = await fetch("manifest.json", { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error(`Could not load manifest.json (${response.status})`);
+        }
+        return response.json();
+      }
+
+      function questionsForFamily() {
+        return state.allQuestions.filter((question) => question.paperFamily === state.family);
+      }
+
+      function questionsForPaperSelection() {
+        const selectedPaper = elements.paperSelect.value;
+        const familyQuestions = questionsForFamily();
+        if (selectedPaper === "all") {
+          return familyQuestions;
+        }
+        return familyQuestions.filter((question) => question.paper === selectedPaper);
+      }
+
+      function questionsForPaperAndTopicSelection() {
+        const selectedTopic = elements.topicSelect.value;
+        const paperQuestions = questionsForPaperSelection();
+        if (selectedTopic === "all") {
+          return paperQuestions;
+        }
+        return paperQuestions.filter((question) => normalizedTopic(question.topic) === selectedTopic);
+      }
+
+      function questionsForSelection() {
+        const selectedQuestion = elements.questionSelect.value;
+        const topicQuestions = questionsForPaperAndTopicSelection();
+        if (selectedQuestion === "all") {
+          return topicQuestions;
+        }
+        return topicQuestions.filter((question) => String(question.questionNumber) === selectedQuestion);
+      }
+
+      function populatePaperSelect() {
+        const papers = [...new Set(questionsForFamily().map((question) => question.paper))].sort();
+        elements.paperSelect.innerHTML = '<option value="all">All papers</option>';
+        papers.forEach((paper) => {
+          const option = document.createElement("option");
+          option.value = paper;
+          option.textContent = paper;
+          elements.paperSelect.append(option);
+        });
+      }
+
+      function populateTopicSelect() {
+        const previousValue = elements.topicSelect.value;
+        const topics = [...new Set(questionsForPaperSelection().map((question) => normalizedTopic(question.topic)))].sort();
+        elements.topicSelect.innerHTML = '<option value="all">All topics</option>';
+        topics.forEach((topic) => {
+          const option = document.createElement("option");
+          option.value = topic;
+          option.textContent = formatTopic(topic);
+          elements.topicSelect.append(option);
+        });
+        elements.topicSelect.value = topics.includes(previousValue) ? previousValue : "all";
+      }
+
+      function populateQuestionSelect() {
+        const previousValue = elements.questionSelect.value;
+        const questionNumbers = [...new Set(questionsForPaperAndTopicSelection().map((question) => String(question.questionNumber)))].sort(questionNumberSort);
+        elements.questionSelect.innerHTML = '<option value="all">Any question</option>';
+        questionNumbers.forEach((questionNumber) => {
+          const option = document.createElement("option");
+          option.value = questionNumber;
+          option.textContent = `Question ${questionNumber}`;
+          elements.questionSelect.append(option);
+        });
+        elements.questionSelect.value = questionNumbers.includes(previousValue) ? previousValue : "all";
+      }
+
+      function refreshDependentFilters({ resetTopic = false, resetQuestion = false } = {}) {
+        if (resetTopic) {
+          elements.topicSelect.value = "all";
+        }
+        populateTopicSelect();
+        if (resetQuestion) {
+          elements.questionSelect.value = "all";
+        }
+        populateQuestionSelect();
+      }
+
+      function resetPool({ randomize = true } = {}) {
+        state.pool = questionsForSelection();
+        if (randomize) {
+          shuffle(state.pool);
+        }
+        state.index = 0;
+        showCurrentQuestion();
+      }
+
+      function showCurrentQuestion() {
+        state.solutionVisible = false;
+        elements.solution.classList.remove("visible");
+        elements.solutionImage.removeAttribute("src");
+        elements.checkSolution.textContent = "Check solution";
+
+        if (!state.pool.length) {
+          state.current = null;
+          renderEmpty("No questions are available for this selection.");
+          return;
+        }
+
+        state.current = state.pool[state.index % state.pool.length];
+        renderQuestion();
+      }
+
+      function nextQuestion() {
+        if (!state.pool.length) {
+          return;
+        }
+        state.index = (state.index + 1) % state.pool.length;
+        showCurrentQuestion();
+      }
+
+      function randomQuestion() {
+        resetPool({ randomize: true });
+      }
+
+      function renderQuestion() {
+        const question = state.current;
+        elements.status.hidden = true;
+        elements.card.hidden = false;
+        elements.title.textContent = familyNames[state.family];
+        elements.questionTitle.textContent = `${question.paper} - Question ${question.questionNumber}`;
+        elements.questionImage.src = question.questionImage;
+        elements.currentPaper.textContent = `Paper: ${question.paper}`;
+        elements.currentQuestion.textContent = `Question: ${question.questionNumber}`;
+        elements.currentTopic.textContent = `Topic: ${formatTopic(question.topic)}`;
+        elements.currentMarks.textContent = question.marks ? `Marks: ${question.marks}` : "Marks: not detected";
+      }
+
+      function renderEmpty(message) {
+        elements.card.hidden = true;
+        elements.status.hidden = false;
+        elements.status.className = "status error";
+        elements.status.textContent = message;
+      }
+
+      function toggleSolution() {
+        if (!state.current) {
+          return;
+        }
+        state.solutionVisible = !state.solutionVisible;
+        if (state.solutionVisible) {
+          elements.solutionImage.src = state.current.markSchemeImage;
+        } else {
+          elements.solutionImage.removeAttribute("src");
+        }
+        elements.solution.classList.toggle("visible", state.solutionVisible);
+        elements.checkSolution.textContent = state.solutionVisible ? "Hide solution" : "Check solution";
+      }
+
+      function formatTopic(topic) {
+        return String(topic || "unknown").replaceAll("_", " ");
+      }
+
+      function normalizedTopic(topic) {
+        return String(topic || "unknown");
+      }
+
+      function questionNumberSort(a, b) {
+        const numericA = Number(a);
+        const numericB = Number(b);
+        if (Number.isFinite(numericA) && Number.isFinite(numericB)) {
+          return numericA - numericB;
+        }
+        return a.localeCompare(b);
+      }
+
+      function shuffle(items) {
+        for (let index = items.length - 1; index > 0; index -= 1) {
+          const swapIndex = Math.floor(Math.random() * (index + 1));
+          [items[index], items[swapIndex]] = [items[swapIndex], items[index]];
+        }
+      }
+
+      elements.paperSelect.addEventListener("change", () => {
+        refreshDependentFilters({ resetTopic: true, resetQuestion: true });
+        resetPool({ randomize: false });
+      });
+      elements.topicSelect.addEventListener("change", () => {
+        refreshDependentFilters({ resetQuestion: true });
+        resetPool({ randomize: false });
+      });
+      elements.questionSelect.addEventListener("change", () => resetPool({ randomize: false }));
+      elements.randomQuestion.addEventListener("click", randomQuestion);
+      elements.nextQuestion.addEventListener("click", nextQuestion);
+      elements.checkSolution.addEventListener("click", toggleSolution);
+
+      loadManifest()
+        .then((manifest) => {
+          state.allQuestions = manifest.questions || [];
+          elements.title.textContent = familyNames[state.family];
+          populatePaperSelect();
+          refreshDependentFilters({ resetTopic: true, resetQuestion: true });
+          resetPool();
+        })
+        .catch((error) => {
+          const suffix = window.location.protocol === "file:" ? " Run this through GitHub Pages or a local web server, not by opening the file directly." : "";
+          renderEmpty(`${error.message}.${suffix}`);
+        });
+    </script>
+  </body>
+</html>

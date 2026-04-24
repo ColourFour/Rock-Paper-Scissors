@@ -36,6 +36,12 @@ jobs:
           if [ -d practice ]; then
             cp -R practice _site/practice
           fi
+          mkdir -p _site/output
+          for paper_dir in output/p1 output/p3 output/p4 output/p5; do
+            if [ -d "$paper_dir" ]; then
+              cp -R "$paper_dir" _site/output/
+            fi
+          done
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

@@ -3,16 +3,20 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Cambridge 9709 Practice</title>
+    <title>CAIE Math Review</title>
     <style>
       :root {
         color-scheme: light;
-        --background: #f7f8f4;
-        --ink: #18201a;
-        --muted: #58625b;
-        --accent: #24735a;
-        --line: #cbd4cc;
-        --surface: #ffffff;
+        --cream: #fbf4e5;
+        --ink: #151711;
+        --muted: #696452;
+        --green: #0d695f;
+        --green-dark: #083f3a;
+        --orange: #de8b2c;
+        --blue: #245c87;
+        --card: rgba(255, 253, 246, 0.84);
+        --line: rgba(35, 30, 21, 0.14);
+        --shadow: 0 24px 80px rgba(48, 35, 18, 0.16);
       }
 
       * {
@@ -22,62 +26,196 @@
       body {
         margin: 0;
         min-height: 100vh;
-        background: var(--background);
+        background:
+          radial-gradient(circle at 12% 10%, rgba(222, 139, 44, 0.24), transparent 28rem),
+          radial-gradient(circle at 86% 20%, rgba(36, 92, 135, 0.18), transparent 30rem),
+          linear-gradient(135deg, #f4e5cc 0%, var(--cream) 48%, #edf4e9 100%);
         color: var(--ink);
-        font-family: Arial, Helvetica, sans-serif;
-        line-height: 1.5;
+        font-family: "Avenir Next", "Gill Sans", "Trebuchet MS", sans-serif;
       }
 
-      main {
-        width: min(840px, calc(100% - 32px));
+      body::before {
+        position: fixed;
+        inset: 0;
+        content: "";
+        pointer-events: none;
+        background-image: linear-gradient(rgba(21, 23, 17, 0.04) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(21, 23, 17, 0.04) 1px, transparent 1px);
+        background-size: 34px 34px;
+        mask-image: linear-gradient(to bottom, black, transparent 82%);
+      }
+
+      .shell {
+        width: min(1120px, calc(100% - 32px));
         margin: 0 auto;
-        padding: 48px 0;
+        padding: 40px 0 56px;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.05fr) minmax(300px, 0.75fr);
+        gap: 28px;
+        align-items: center;
+      }
+
+      .eyebrow {
+        margin: 0 0 10px;
+        color: var(--green-dark);
+        font-size: 13px;
+        font-weight: 900;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
       }
 
       h1 {
-        margin: 0 0 12px;
-        font-size: clamp(32px, 6vw, 56px);
-        line-height: 1.05;
-        letter-spacing: 0;
+        margin: 0;
+        font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+        font-size: clamp(50px, 9vw, 104px);
+        line-height: 0.9;
+        letter-spacing: -0.06em;
       }
 
-      p {
+      .intro {
         max-width: 680px;
-        margin: 0 0 18px;
+        margin: 20px 0 0;
         color: var(--muted);
-        font-size: 18px;
+        font-size: clamp(18px, 2.3vw, 23px);
+        line-height: 1.45;
       }
 
-      a.button {
-        display: inline-block;
-        min-height: 42px;
-        border: 1px solid var(--accent);
-        border-radius: 8px;
-        background: var(--accent);
-        color: #ffffff;
-        font-weight: 700;
-        padding: 10px 16px;
+      .art {
+        border: 1px solid var(--line);
+        border-radius: 36px;
+        background: var(--card);
+        box-shadow: var(--shadow);
+        padding: 24px;
+        backdrop-filter: blur(14px);
+      }
+
+      .art svg {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 16px;
+        margin-top: 30px;
+      }
+
+      .card {
+        min-height: 170px;
+        border: 1px solid var(--line);
+        border-radius: 28px;
+        background: var(--card);
+        color: var(--ink);
+        box-shadow: var(--shadow);
+        padding: 22px;
         text-decoration: none;
+        transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
       }
 
-      a.button:hover {
-        background: #1b5845;
+      .card:hover {
+        transform: translateY(-4px);
+        border-color: rgba(13, 105, 95, 0.38);
+        background: #fffdf6;
       }
 
-      .note {
-        margin-top: 28px;
-        border-top: 1px solid var(--line);
-        padding-top: 16px;
-        font-size: 14px;
+      .code {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 50px;
+        border-radius: 999px;
+        background: rgba(13, 105, 95, 0.12);
+        color: var(--green-dark);
+        padding: 7px 12px;
+        font-weight: 900;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .card h2 {
+        margin: 22px 0 8px;
+        font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+        font-size: 30px;
+        line-height: 1;
+        letter-spacing: -0.035em;
+      }
+
+      .card p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.4;
+      }
+
+      @media (max-width: 880px) {
+        .hero,
+        .cards {
+          grid-template-columns: 1fr;
+        }
+
+        .art {
+          order: -1;
+        }
       }
     </style>
   </head>
   <body>
-    <main>
-      <h1>Cambridge 9709 Practice</h1>
-      <p>Choose a paper and topic, get a random question, then reveal the mapped mark scheme when you are ready.</p>
-      <p><a class="button" href="practice/">Open the practice page</a></p>
-      <p class="note">The practice page is fully static and can be shared through GitHub Pages.</p>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">CAIE 9709 practice</p>
+          <h1>CAIE Math Review</h1>
+          <p class="intro">Pick a paper, try one question at a time, then reveal the mark scheme when you are ready. Keep it simple: attempt first, check after.</p>
+        </div>
+        <div class="art" aria-label="Encouraging maths illustration">
+          <svg viewBox="0 0 520 420" role="img" aria-labelledby="art-title">
+            <title id="art-title">A cheerful desk with maths notes, a pencil, and a rising sun</title>
+            <defs>
+              <linearGradient id="sun" x1="0" x2="1">
+                <stop offset="0" stop-color="#ffcf6b"/>
+                <stop offset="1" stop-color="#de8b2c"/>
+              </linearGradient>
+            </defs>
+            <rect width="520" height="420" rx="34" fill="#fff7e8"/>
+            <circle cx="405" cy="94" r="58" fill="url(#sun)"/>
+            <path d="M74 286c64-86 121-87 171-23 41 51 86 48 132-4 28-32 55-45 82-38" fill="none" stroke="#0d695f" stroke-width="16" stroke-linecap="round"/>
+            <rect x="82" y="122" width="228" height="164" rx="18" fill="#ffffff" stroke="#d8c8aa" stroke-width="4"/>
+            <path d="M116 164h154M116 202h116M116 240h148" stroke="#245c87" stroke-width="9" stroke-linecap="round"/>
+            <path d="M350 246l74 74" stroke="#151711" stroke-width="18" stroke-linecap="round"/>
+            <path d="M330 224l42-42 74 74-42 42z" fill="#f6b24b" stroke="#151711" stroke-width="8" stroke-linejoin="round"/>
+            <path d="M372 182l24-24 74 74-24 24z" fill="#0d695f" stroke="#151711" stroke-width="8" stroke-linejoin="round"/>
+            <text x="112" y="86" fill="#151711" font-family="Georgia, serif" font-size="34" font-weight="700">x^2 + y^2</text>
+            <text x="328" y="362" fill="#0d695f" font-family="Avenir Next, sans-serif" font-size="26" font-weight="800">You have this.</text>
+          </svg>
+        </div>
+      </section>
+
+      <section class="cards" aria-label="Choose a paper">
+        <a class="card" href="practice/?family=p1">
+          <span class="code">P1</span>
+          <h2>Pure Math 1</h2>
+          <p>Algebra, functions, coordinate geometry, calculus, and core pure practice.</p>
+        </a>
+        <a class="card" href="practice/?family=p3">
+          <span class="code">P3</span>
+          <h2>Pure Math 3</h2>
+          <p>Advanced pure topics with harder algebra, calculus, vectors, and complex numbers.</p>
+        </a>
+        <a class="card" href="practice/?family=p4">
+          <span class="code">P4</span>
+          <h2>Mechanics</h2>
+          <p>Forces, motion, energy, momentum, and modelling physical situations.</p>
+        </a>
+        <a class="card" href="practice/?family=p5">
+          <span class="code">P5</span>
+          <h2>Statistics</h2>
+          <p>Probability, distributions, hypothesis testing, and data interpretation.</p>
+        </a>
+      </section>
     </main>
   </body>
 </html>
