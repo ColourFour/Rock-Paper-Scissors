@@ -340,7 +340,7 @@ function normalizeDifficulty(value) {
 
 function topicKeyFor(question) {
   const enrichment = state.enrichments[question.id] || {};
-  return broadTopicKey(enrichment.deepseek_topic_normalized || enrichment.deepseek_topic || question.topic || "miscellaneous");
+  return normalizeTopic(enrichment.deepseek_topic_normalized || enrichment.deepseek_topic || question.topic || "miscellaneous", question.paperFamily);
 }
 
 function marksGroupFor(question) {
@@ -397,7 +397,7 @@ function syncAllSelectCountLabels() {
 function applyInitialFilters() {
   setSelectValue(elements.paperSelect, initialFilters.paper);
   refreshDependentFilters();
-  setSelectValue(elements.topicSelect, broadTopicKey(initialFilters.topic));
+  setSelectValue(elements.topicSelect, normalizeTopic(initialFilters.topic, family));
   refreshDependentFilters();
   setSelectValue(elements.difficultySelect, normalizeInitialDifficulty(initialFilters.difficulty));
   populateMarksSelect();
@@ -451,16 +451,20 @@ function formatTopic(topic) {
   const labels = {
     binomial_expansion: "Binomial expansion",
     binomial_distribution: "Binomial distribution",
+    circular_measure: "Circular measure",
     connected_particles: "Connected particles",
     coordinate_geometry: "Coordinate geometry",
     complex_numbers: "Complex numbers",
     differential_equations: "Differential equations",
+    differentiation_integration: "Differentiation and integration",
     discrete_random_variables: "Discrete random variables",
     forces_newtons_laws: "Forces and Newton's laws",
     hypothesis_testing: "Hypothesis testing",
     logarithms_exponentials: "Logarithms and exponentials",
+    modulus_functions: "Modulus functions",
     normal_distribution: "Normal distribution",
     numerical_methods: "Numerical methods",
+    parametric_equations: "Parametric equations",
     permutations_combinations: "Permutations and combinations",
     series_sequences: "Series and sequences",
     work_energy_power: "Work, energy and power",
@@ -474,12 +478,166 @@ function formatTopic(topic) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function broadTopicKey(value) {
+function normalizeTopic(value, paperFamily = family) {
   const text = cleanTopicText(value);
   if (!text || text === "unknown" || text === "miscellaneous") {
     return "miscellaneous";
   }
 
+  if (paperFamily === "p1") {
+    return normalizeP1Topic(text);
+  }
+  if (paperFamily === "p3") {
+    return normalizeP3Topic(text);
+  }
+  if (paperFamily === "p5") {
+    return normalizeP5Topic(text);
+  }
+  if (paperFamily === "p4") {
+    return normalizeP4Topic(text);
+  }
+
+  return normalizeGeneralTopic(text);
+}
+
+function normalizeP1Topic(text) {
+  if (["binomial expansion", "binomial theorem"].includes(text)) {
+    return "binomial_expansion";
+  }
+  if (["circular measure", "radians", "sectors", "arc length"].includes(text)) {
+    return "circular_measure";
+  }
+  if (["coordinate geometry", "geometry", "circles", "circle", "equation of circle", "straight line", "line and circle"].includes(text)) {
+    return "coordinate_geometry";
+  }
+  if (["quadratics", "quadratic functions", "quadratic equations", "discriminant", "completing the square"].includes(text)) {
+    return "quadratics";
+  }
+  if (["functions", "function transformations", "transformations", "graph transformations", "inverse functions", "composite functions"].includes(text)) {
+    return "functions";
+  }
+  if (text === "differentiation and integration" || hasBoth(text, "differentiation", "integration")) {
+    return "differentiation_integration";
+  }
+  if (["integration", "definite integration", "indefinite integration", "area under curve"].includes(text)) {
+    return "integration";
+  }
+  if (["differentiation", "derivatives", "applications of differentiation", "calculus"].includes(text)) {
+    return "differentiation";
+  }
+  if (["trigonometry", "trigonometric equations", "trig equations", "trigonometric identities", "trig identities", "sine cosine tangent"].includes(text)) {
+    return "trigonometry";
+  }
+  if (["series and sequences", "sequences and series", "arithmetic progression", "geometric progression", "summation notation"].includes(text)) {
+    return "series_sequences";
+  }
+  if (["algebra", "equations", "inequalities", "manipulation", "partial fractions"].includes(text)) {
+    return "algebra";
+  }
+  return normalizeGeneralTopic(text);
+}
+
+function normalizeP3Topic(text) {
+  if (["algebra", "polynomials", "polynomial", "partial fractions", "rational functions"].includes(text)) {
+    return "algebra";
+  }
+  if (["absolute value functions", "absolute value functions and inequalities", "modulus functions", "modulus inequalities"].includes(text)) {
+    return "modulus_functions";
+  }
+  if (["binomial expansion", "binomial theorem"].includes(text)) {
+    return "binomial_expansion";
+  }
+  if (["complex numbers", "complex number", "argand diagram", "roots of complex numbers"].includes(text)) {
+    return "complex_numbers";
+  }
+  if (["differentiation", "implicit differentiation", "derivatives", "applications of differentiation", "parametric differentiation"].includes(text)) {
+    return "differentiation";
+  }
+  if (["integration", "definite integration", "indefinite integration", "area under curve", "integration techniques"].includes(text)) {
+    return "integration";
+  }
+  if (text === "differentiation and integration" || hasBoth(text, "differentiation", "integration")) {
+    return "differentiation_integration";
+  }
+  if (["differential equations", "first order differential equations", "separable differential equations"].includes(text)) {
+    return "differential_equations";
+  }
+  if ([
+    "logarithms and exponentials",
+    "exponential and logarithmic functions",
+    "logarithms",
+    "exponentials",
+    "exponential functions",
+    "logarithmic functions",
+  ].includes(text)) {
+    return "logarithms_exponentials";
+  }
+  if (["numerical methods", "iteration", "root finding", "newton raphson"].includes(text)) {
+    return "numerical_methods";
+  }
+  if (["parametric equations", "parametric"].includes(text)) {
+    return "parametric_equations";
+  }
+  if (["trigonometry", "trigonometric equations", "trigonometric identities", "trig identities", "inverse trig"].includes(text)) {
+    return "trigonometry";
+  }
+  if (["vectors", "vector geometry", "scalar product"].includes(text)) {
+    return "vectors";
+  }
+  if (["functions", "inverse functions", "composite functions", "transformations"].includes(text)) {
+    return "functions";
+  }
+  if (text === "calculus") {
+    return "differentiation_integration";
+  }
+  return normalizeGeneralTopic(text);
+}
+
+function normalizeP5Topic(text) {
+  if ([
+    "probability",
+    "conditional probability",
+    "independent events",
+    "mutually exclusive",
+    "probability and statistics",
+    "probability and statistics 1",
+  ].includes(text)) {
+    return "probability";
+  }
+  if (["permutations and combinations", "permutation", "combination", "counting"].includes(text)) {
+    return "permutations_combinations";
+  }
+  if ([
+    "discrete random variables",
+    "discrete probability distributions",
+    "random variables",
+    "probability distributions",
+    "summation notation",
+  ].includes(text)) {
+    return "discrete_random_variables";
+  }
+  if (["binomial distribution", "binomial probability"].includes(text)) {
+    return "binomial_distribution";
+  }
+  if (["normal distribution", "the normal distribution", "normal probabilities"].includes(text)) {
+    return "normal_distribution";
+  }
+  if ([
+    "statistics",
+    "measures of central tendency and dispersion",
+    "statistical data representation and summary statistics",
+    "data representation",
+    "representation of data",
+    "summary statistics",
+    "measures of central tendency",
+    "dispersion",
+  ].includes(text)) {
+    return "statistics";
+  }
+  return normalizeGeneralTopic(text);
+}
+
+function normalizeP4Topic(text) {
   if (text.startsWith("dynamics")) {
     return "dynamics";
   }
@@ -511,6 +669,10 @@ function broadTopicKey(value) {
     return "friction";
   }
 
+  return normalizeGeneralTopic(text);
+}
+
+function normalizeGeneralTopic(text) {
   if (["binomial expansion", "binomial theorem"].includes(text)) {
     return "binomial_expansion";
   }
@@ -574,6 +736,10 @@ function broadTopicKey(value) {
   }
 
   return normalizeKey(text);
+}
+
+function hasBoth(text, first, second) {
+  return text.includes(first) && text.includes(second);
 }
 
 function cleanTopicText(value) {
