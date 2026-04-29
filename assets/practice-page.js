@@ -1,5 +1,6 @@
 const family = window.EXAM_FAMILY;
 const familyTitle = window.EXAM_TITLE || "Practice";
+const compactFamilyTitle = window.EXAM_COMPACT_TITLE || familyTitle;
 
 const state = {
   allQuestions: [],
@@ -32,16 +33,27 @@ const elements = {
   currentTopic: document.querySelector("#current-topic"),
   currentMarks: document.querySelector("#current-marks"),
   currentDifficulty: document.querySelector("#current-difficulty"),
+  footerQuote: document.querySelector("#footer-quote"),
 };
 
 const difficultyLabels = {
   easy: "Easy",
   average: "Average",
   difficult: "Difficult",
-  unknown: "Unknown",
+  miscellaneous: "Miscellaneous",
 };
 
-const difficultyOrder = ["easy", "average", "difficult", "unknown"];
+const difficultyOrder = ["easy", "average", "difficult", "miscellaneous"];
+const quotes = [
+  "Pressure means you are in the game.",
+  "Hard questions make strong mathematicians.",
+  "Earn the calm by doing the reps.",
+  "The exam is not bigger than your preparation.",
+  "One clean step at a time.",
+  "Steady practice turns nerves into focus.",
+  "Show your method. Trust your training.",
+  "Make the hard thing familiar.",
+];
 const queryFilters = new URLSearchParams(window.location.search);
 const initialFilters = {
   paper: queryFilters.get("paper") || "all",
@@ -107,7 +119,7 @@ function questionsForPaperAndTopicSelection() {
   if (selectedTopic === "all") {
     return questions;
   }
-  return questions.filter((question) => normalizedTopic(question.topic) === selectedTopic);
+  return questions.filter((question) => topicKeyFor(question) === selectedTopic);
 }
 
 function questionsForPaperTopicAndDifficultySelection() {
@@ -125,28 +137,31 @@ function questionsForSelection() {
   if (selectedMarks === "all") {
     return questions;
   }
-  return questions.filter((question) => marksValue(question) === selectedMarks);
+  return questions.filter((question) => marksGroupFor(question) === selectedMarks);
 }
 
 function populatePaperSelect() {
   const papers = [...new Set(questionsForFamily().map((question) => question.paper))].sort(comparePaper);
-  elements.paperSelect.innerHTML = '<option value="all">All papers</option>';
+  elements.paperSelect.innerHTML = `<option value="all">All papers (${questionsForFamily().length})</option>`;
   papers.forEach((paper) => {
+    const count = questionsForFamily().filter((question) => question.paper === paper).length;
     const option = document.createElement("option");
     option.value = paper;
-    option.textContent = paper;
+    option.textContent = `${paper} (${count})`;
     elements.paperSelect.append(option);
   });
 }
 
 function populateTopicSelect() {
   const previousValue = elements.topicSelect.value;
-  const topics = [...new Set(questionsForPaperSelection().map((question) => normalizedTopic(question.topic)))].sort();
-  elements.topicSelect.innerHTML = '<option value="all">All topics</option>';
+  const questions = questionsForPaperSelection();
+  const topicCounts = countBy(questions, topicKeyFor);
+  const topics = [...topicCounts.keys()].sort((a, b) => formatTopic(a).localeCompare(formatTopic(b)));
+  elements.topicSelect.innerHTML = `<option value="all">All topics (${questions.length})</option>`;
   topics.forEach((topic) => {
     const option = document.createElement("option");
     option.value = topic;
-    option.textContent = formatTopic(topic);
+    option.textContent = `${formatTopic(topic)} (${topicCounts.get(topic)})`;
     elements.topicSelect.append(option);
   });
   elements.topicSelect.value = previousValue === "all" || topics.includes(previousValue) ? previousValue : "all";
@@ -154,12 +169,14 @@ function populateTopicSelect() {
 
 function populateDifficultySelect() {
   const previousValue = elements.difficultySelect.value;
-  const available = new Set(questionsForPaperAndTopicSelection().map(difficultyFor));
-  elements.difficultySelect.innerHTML = '<option value="all">All difficulties</option>';
+  const questions = questionsForPaperAndTopicSelection();
+  const difficultyCounts = countBy(questions, difficultyFor);
+  const available = new Set(difficultyCounts.keys());
+  elements.difficultySelect.innerHTML = `<option value="all">All difficulties (${questions.length})</option>`;
   difficultyOrder.forEach((difficulty) => {
     const option = document.createElement("option");
     option.value = difficulty;
-    option.textContent = difficultyLabels[difficulty];
+    option.textContent = `${difficultyLabels[difficulty]} (${difficultyCounts.get(difficulty) || 0})`;
     elements.difficultySelect.append(option);
   });
   elements.difficultySelect.value = previousValue === "all" || available.has(previousValue) ? previousValue : "all";
@@ -167,26 +184,36 @@ function populateDifficultySelect() {
 
 function populateMarksSelect() {
   const previousValue = elements.marksSelect.value;
-  const markValues = [...new Set(questionsForPaperTopicAndDifficultySelection().map(marksValue))];
+  const questions = questionsForPaperTopicAndDifficultySelection();
+  const markCounts = countBy(questions, marksGroupFor);
+  const markValues = [...markCounts.keys()];
   const numericMarks = markValues
-    .filter((value) => value !== "unknown")
+    .filter((value) => !["12plus", "miscellaneous"].includes(value))
     .sort((a, b) => Number(a) - Number(b));
-  const hasUnknown = markValues.includes("unknown");
+  const hasTwelvePlus = markValues.includes("12plus");
+  const hasMiscellaneous = markValues.includes("miscellaneous");
   const available = new Set(numericMarks);
 
-  elements.marksSelect.innerHTML = '<option value="all">All marks</option>';
+  elements.marksSelect.innerHTML = `<option value="all">All marks (${questions.length})</option>`;
   numericMarks.forEach((marks) => {
     const option = document.createElement("option");
     option.value = marks;
-    option.textContent = `${marks} marks`;
+    option.textContent = `${formatMarksGroup(marks)} (${markCounts.get(marks)})`;
     elements.marksSelect.append(option);
   });
-  if (hasUnknown) {
+  if (hasTwelvePlus) {
     const option = document.createElement("option");
-    option.value = "unknown";
-    option.textContent = "Unknown";
+    option.value = "12plus";
+    option.textContent = `12+ marks (${markCounts.get("12plus")})`;
     elements.marksSelect.append(option);
-    available.add("unknown");
+    available.add("12plus");
+  }
+  if (hasMiscellaneous) {
+    const option = document.createElement("option");
+    option.value = "miscellaneous";
+    option.textContent = `Miscellaneous (${markCounts.get("miscellaneous")})`;
+    elements.marksSelect.append(option);
+    available.add("miscellaneous");
   }
 
   elements.marksSelect.value = previousValue === "all" || available.has(previousValue) ? previousValue : "all";
@@ -261,14 +288,14 @@ function renderQuestion() {
   setNavigationDisabled(false);
   elements.status.hidden = true;
   elements.card.hidden = false;
-  elements.title.textContent = familyTitle;
+  elements.title.textContent = compactFamilyTitle;
   elements.questionTitle.textContent = `${question.paper} - Question ${question.questionNumber}`;
   elements.questionImage.src = question.questionImage;
   elements.questionImage.alt = `${question.paper} question ${question.questionNumber}`;
   elements.currentPaper.textContent = `Paper: ${question.paper}`;
   elements.currentQuestion.textContent = `Question: ${question.questionNumber}`;
-  elements.currentTopic.textContent = `Topic: ${formatTopic(question.topic)}`;
-  elements.currentMarks.textContent = question.marks ? `Marks: ${question.marks}` : "Marks: not detected";
+  elements.currentTopic.textContent = `Topic: ${formatTopic(topicKeyFor(question))}`;
+  elements.currentMarks.textContent = `Marks: ${formatMarksGroup(marksGroupFor(question))}`;
   elements.currentDifficulty.textContent = `Difficulty: ${difficultyLabels[difficulty]}`;
 }
 
@@ -303,11 +330,11 @@ function setNavigationDisabled(disabled) {
 
 function difficultyFor(question) {
   const enrichment = state.enrichments[question.id] || {};
-  return normalizeDifficulty(enrichment.deepseek_difficulty_normalized || enrichment.deepseek_difficulty || "unknown");
+  return normalizeDifficulty(enrichment.deepseek_difficulty_normalized || enrichment.deepseek_difficulty || "miscellaneous");
 }
 
 function normalizeDifficulty(value) {
-  const normalized = String(value || "unknown").trim().toLowerCase().replace(/\s+/g, "_");
+  const normalized = normalizeKey(value);
   if (normalized === "easy") {
     return "easy";
   }
@@ -317,24 +344,52 @@ function normalizeDifficulty(value) {
   if (["difficult", "hard"].includes(normalized)) {
     return "difficult";
   }
-  return "unknown";
+  return "miscellaneous";
 }
 
-function marksValue(question) {
-  if (question.marks === undefined || question.marks === null || question.marks === "") {
-    return "unknown";
+function topicKeyFor(question) {
+  const enrichment = state.enrichments[question.id] || {};
+  return normalizeKey(enrichment.deepseek_topic_normalized || enrichment.deepseek_topic || question.topic || "miscellaneous");
+}
+
+function marksGroupFor(question) {
+  const marks = Number(question.marks);
+  if (!Number.isFinite(marks)) {
+    return "miscellaneous";
   }
-  return String(question.marks);
+  if (marks >= 12) {
+    return "12plus";
+  }
+  return String(marks);
+}
+
+function formatMarksGroup(group) {
+  if (group === "12plus") {
+    return "12+ marks";
+  }
+  if (group === "miscellaneous") {
+    return "Miscellaneous";
+  }
+  return Number(group) === 1 ? "1 mark" : `${group} marks`;
+}
+
+function countBy(items, keyFor) {
+  const counts = new Map();
+  items.forEach((item) => {
+    const key = keyFor(item);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  return counts;
 }
 
 function applyInitialFilters() {
   setSelectValue(elements.paperSelect, initialFilters.paper);
   refreshDependentFilters();
-  setSelectValue(elements.topicSelect, initialFilters.topic);
+  setSelectValue(elements.topicSelect, normalizeKey(initialFilters.topic));
   refreshDependentFilters();
   setSelectValue(elements.difficultySelect, normalizeInitialDifficulty(initialFilters.difficulty));
   populateMarksSelect();
-  setSelectValue(elements.marksSelect, initialFilters.marks);
+  setSelectValue(elements.marksSelect, normalizeInitialMarks(initialFilters.marks));
 }
 
 function normalizeInitialDifficulty(value) {
@@ -342,6 +397,18 @@ function normalizeInitialDifficulty(value) {
     return "all";
   }
   return normalizeDifficulty(value);
+}
+
+function normalizeInitialMarks(value) {
+  if (value === "all") {
+    return "all";
+  }
+  const marks = Number(value);
+  if (Number.isFinite(marks)) {
+    return marks >= 12 ? "12plus" : String(marks);
+  }
+  const normalized = normalizeKey(value);
+  return ["12plus", "miscellaneous"].includes(normalized) ? normalized : "miscellaneous";
 }
 
 function setSelectValue(select, value) {
@@ -368,13 +435,18 @@ function setQueryParam(params, key, value) {
 }
 
 function formatTopic(topic) {
-  return String(topic || "unknown")
+  return String(topic || "miscellaneous")
     .replaceAll("_", " ")
+    .toLowerCase()
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function normalizedTopic(topic) {
-  return String(topic || "unknown");
+function normalizeKey(value) {
+  const normalized = String(value || "").trim().toLowerCase().replace(/\s+/g, "_");
+  if (!normalized || normalized === "unknown") {
+    return "miscellaneous";
+  }
+  return normalized;
 }
 
 function compareQuestion(a, b) {
@@ -446,12 +518,20 @@ Promise.all([
       .filter((record) => record.paper_family === family && hasImages(record))
       .map(normalizeQuestion)
       .sort(compareQuestion);
-    elements.title.textContent = familyTitle;
+    elements.title.textContent = compactFamilyTitle;
     populatePaperSelect();
     applyInitialFilters();
+    setFooterQuote();
     resetPool({ randomize: false });
   })
   .catch((error) => {
     const suffix = window.location.protocol === "file:" ? " Run this through GitHub Pages or a local web server, not by opening the file directly." : "";
     renderEmpty(`${error.message}.${suffix}`);
   });
+
+function setFooterQuote() {
+  if (!elements.footerQuote) {
+    return;
+  }
+  elements.footerQuote.textContent = quotes[Math.floor(Math.random() * quotes.length)];
+}
