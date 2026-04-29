@@ -141,30 +141,29 @@ function questionsForSelection() {
 }
 
 function populatePaperSelect() {
-  const papers = [...new Set(questionsForFamily().map((question) => question.paper))].sort(comparePaper);
-  elements.paperSelect.innerHTML = `<option value="all">All papers (${questionsForFamily().length})</option>`;
+  const familyQuestions = questionsForFamily();
+  const papers = [...new Set(familyQuestions.map((question) => question.paper))].sort(comparePaper);
+  elements.paperSelect.innerHTML = "";
+  appendCountedOption(elements.paperSelect, "all", "All papers", familyQuestions.length);
   papers.forEach((paper) => {
-    const count = questionsForFamily().filter((question) => question.paper === paper).length;
-    const option = document.createElement("option");
-    option.value = paper;
-    option.textContent = `${paper} (${count})`;
-    elements.paperSelect.append(option);
+    const count = familyQuestions.filter((question) => question.paper === paper).length;
+    appendCountedOption(elements.paperSelect, paper, paper, count);
   });
+  syncSelectCountLabels(elements.paperSelect);
 }
 
 function populateTopicSelect() {
   const previousValue = elements.topicSelect.value;
   const questions = questionsForPaperSelection();
   const topicCounts = countBy(questions, topicKeyFor);
-  const topics = [...topicCounts.keys()].sort((a, b) => formatTopic(a).localeCompare(formatTopic(b)));
-  elements.topicSelect.innerHTML = `<option value="all">All topics (${questions.length})</option>`;
+  const topics = [...topicCounts.keys()].sort(compareTopicKeys);
+  elements.topicSelect.innerHTML = "";
+  appendCountedOption(elements.topicSelect, "all", "All topics", questions.length);
   topics.forEach((topic) => {
-    const option = document.createElement("option");
-    option.value = topic;
-    option.textContent = `${formatTopic(topic)} (${topicCounts.get(topic)})`;
-    elements.topicSelect.append(option);
+    appendCountedOption(elements.topicSelect, topic, formatTopic(topic), topicCounts.get(topic));
   });
   elements.topicSelect.value = previousValue === "all" || topics.includes(previousValue) ? previousValue : "all";
+  syncSelectCountLabels(elements.topicSelect);
 }
 
 function populateDifficultySelect() {
@@ -172,14 +171,13 @@ function populateDifficultySelect() {
   const questions = questionsForPaperAndTopicSelection();
   const difficultyCounts = countBy(questions, difficultyFor);
   const available = new Set(difficultyCounts.keys());
-  elements.difficultySelect.innerHTML = `<option value="all">All difficulties (${questions.length})</option>`;
+  elements.difficultySelect.innerHTML = "";
+  appendCountedOption(elements.difficultySelect, "all", "All difficulties", questions.length);
   difficultyOrder.forEach((difficulty) => {
-    const option = document.createElement("option");
-    option.value = difficulty;
-    option.textContent = `${difficultyLabels[difficulty]} (${difficultyCounts.get(difficulty) || 0})`;
-    elements.difficultySelect.append(option);
+    appendCountedOption(elements.difficultySelect, difficulty, difficultyLabels[difficulty], difficultyCounts.get(difficulty) || 0);
   });
   elements.difficultySelect.value = previousValue === "all" || available.has(previousValue) ? previousValue : "all";
+  syncSelectCountLabels(elements.difficultySelect);
 }
 
 function populateMarksSelect() {
@@ -194,29 +192,22 @@ function populateMarksSelect() {
   const hasMiscellaneous = markValues.includes("miscellaneous");
   const available = new Set(numericMarks);
 
-  elements.marksSelect.innerHTML = `<option value="all">All marks (${questions.length})</option>`;
+  elements.marksSelect.innerHTML = "";
+  appendCountedOption(elements.marksSelect, "all", "All marks", questions.length);
   numericMarks.forEach((marks) => {
-    const option = document.createElement("option");
-    option.value = marks;
-    option.textContent = `${formatMarksGroup(marks)} (${markCounts.get(marks)})`;
-    elements.marksSelect.append(option);
+    appendCountedOption(elements.marksSelect, marks, formatMarksGroup(marks), markCounts.get(marks));
   });
   if (hasTwelvePlus) {
-    const option = document.createElement("option");
-    option.value = "12plus";
-    option.textContent = `12+ marks (${markCounts.get("12plus")})`;
-    elements.marksSelect.append(option);
+    appendCountedOption(elements.marksSelect, "12plus", "12+ marks", markCounts.get("12plus"));
     available.add("12plus");
   }
   if (hasMiscellaneous) {
-    const option = document.createElement("option");
-    option.value = "miscellaneous";
-    option.textContent = `Miscellaneous (${markCounts.get("miscellaneous")})`;
-    elements.marksSelect.append(option);
+    appendCountedOption(elements.marksSelect, "miscellaneous", "Miscellaneous", markCounts.get("miscellaneous"));
     available.add("miscellaneous");
   }
 
   elements.marksSelect.value = previousValue === "all" || available.has(previousValue) ? previousValue : "all";
+  syncSelectCountLabels(elements.marksSelect);
 }
 
 function refreshDependentFilters({ resetTopic = false, resetDifficulty = false, resetMarks = false } = {}) {
@@ -349,7 +340,7 @@ function normalizeDifficulty(value) {
 
 function topicKeyFor(question) {
   const enrichment = state.enrichments[question.id] || {};
-  return normalizeKey(enrichment.deepseek_topic_normalized || enrichment.deepseek_topic || question.topic || "miscellaneous");
+  return broadTopicKey(enrichment.deepseek_topic_normalized || enrichment.deepseek_topic || question.topic || "miscellaneous");
 }
 
 function marksGroupFor(question) {
@@ -382,14 +373,36 @@ function countBy(items, keyFor) {
   return counts;
 }
 
+function appendCountedOption(select, value, label, count) {
+  const option = document.createElement("option");
+  option.value = value;
+  option.dataset.label = label;
+  option.dataset.count = String(count);
+  option.textContent = `${label} (${count})`;
+  select.append(option);
+}
+
+function syncSelectCountLabels(select) {
+  [...select.options].forEach((option) => {
+    const label = option.dataset.label || option.textContent;
+    const count = option.dataset.count;
+    option.textContent = option.selected || count === undefined ? label : `${label} (${count})`;
+  });
+}
+
+function syncAllSelectCountLabels() {
+  [elements.paperSelect, elements.topicSelect, elements.difficultySelect, elements.marksSelect].forEach(syncSelectCountLabels);
+}
+
 function applyInitialFilters() {
   setSelectValue(elements.paperSelect, initialFilters.paper);
   refreshDependentFilters();
-  setSelectValue(elements.topicSelect, normalizeKey(initialFilters.topic));
+  setSelectValue(elements.topicSelect, broadTopicKey(initialFilters.topic));
   refreshDependentFilters();
   setSelectValue(elements.difficultySelect, normalizeInitialDifficulty(initialFilters.difficulty));
   populateMarksSelect();
   setSelectValue(elements.marksSelect, normalizeInitialMarks(initialFilters.marks));
+  syncAllSelectCountLabels();
 }
 
 function normalizeInitialDifficulty(value) {
@@ -435,18 +448,162 @@ function setQueryParam(params, key, value) {
 }
 
 function formatTopic(topic) {
+  const labels = {
+    binomial_expansion: "Binomial expansion",
+    binomial_distribution: "Binomial distribution",
+    connected_particles: "Connected particles",
+    coordinate_geometry: "Coordinate geometry",
+    complex_numbers: "Complex numbers",
+    differential_equations: "Differential equations",
+    discrete_random_variables: "Discrete random variables",
+    forces_newtons_laws: "Forces and Newton's laws",
+    hypothesis_testing: "Hypothesis testing",
+    logarithms_exponentials: "Logarithms and exponentials",
+    normal_distribution: "Normal distribution",
+    numerical_methods: "Numerical methods",
+    permutations_combinations: "Permutations and combinations",
+    series_sequences: "Series and sequences",
+    work_energy_power: "Work, energy and power",
+  };
+  if (labels[topic]) {
+    return labels[topic];
+  }
   return String(topic || "miscellaneous")
     .replaceAll("_", " ")
     .toLowerCase()
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function broadTopicKey(value) {
+  const text = cleanTopicText(value);
+  if (!text || text === "unknown" || text === "miscellaneous") {
+    return "miscellaneous";
+  }
+
+  if (text.startsWith("dynamics")) {
+    return "dynamics";
+  }
+  if (text.startsWith("kinematics") || text === "motion graphs") {
+    return "kinematics";
+  }
+  if (["momentum", "momentum impulse", "impulse"].includes(text)) {
+    return "momentum";
+  }
+  if (["work energy power", "work energy and power", "power and resistance", "energy"].includes(text)) {
+    return "work_energy_power";
+  }
+  if (text.includes("connected particles")) {
+    return "connected_particles";
+  }
+  if ([
+    "equilibrium particle",
+    "equilibrium of forces",
+    "equilibrium of coplanar forces",
+    "equilibrium coplanar forces",
+    "forces in equilibrium",
+  ].includes(text)) {
+    return "equilibrium";
+  }
+  if (["forces", "forces and newtons laws", "newtons laws of motion"].includes(text)) {
+    return "forces_newtons_laws";
+  }
+  if (["friction", "friction rough plane", "rough plane"].includes(text)) {
+    return "friction";
+  }
+
+  if (["binomial expansion", "binomial theorem"].includes(text)) {
+    return "binomial_expansion";
+  }
+  if (["coordinate geometry", "circles", "equation of circle"].includes(text)) {
+    return "coordinate_geometry";
+  }
+  if (["quadratics", "quadratic equations", "discriminant"].includes(text)) {
+    return "quadratics";
+  }
+  if (["functions", "transformations", "graph transformations", "inverse functions", "composite functions"].includes(text)) {
+    return "functions";
+  }
+  if (["differentiation", "derivatives", "applications of differentiation"].includes(text)) {
+    return "differentiation";
+  }
+  if (["integration", "definite integration", "indefinite integration", "area under curve"].includes(text)) {
+    return "integration";
+  }
+  if (["trigonometry", "trigonometric equations", "trig identities"].includes(text)) {
+    return "trigonometry";
+  }
+  if (["series and sequences", "sequences and series", "arithmetic progression", "geometric progression"].includes(text)) {
+    return "series_sequences";
+  }
+  if (["logarithms and exponentials", "exponentials and logarithms", "logarithms", "exponentials"].includes(text)) {
+    return "logarithms_exponentials";
+  }
+  if (["vectors", "vector geometry"].includes(text)) {
+    return "vectors";
+  }
+  if (["complex numbers", "argand diagram"].includes(text)) {
+    return "complex_numbers";
+  }
+  if (["numerical methods", "iteration"].includes(text)) {
+    return "numerical_methods";
+  }
+  if (text === "differential equations") {
+    return "differential_equations";
+  }
+
+  if (["discrete random variables", "random variables", "probability distributions"].includes(text)) {
+    return "discrete_random_variables";
+  }
+  if (["probability", "conditional probability", "independent events"].includes(text)) {
+    return "probability";
+  }
+  if (["statistics", "descriptive statistics", "representation of data", "data representation"].includes(text)) {
+    return "statistics";
+  }
+  if (text === "binomial distribution") {
+    return "binomial_distribution";
+  }
+  if (text === "normal distribution") {
+    return "normal_distribution";
+  }
+  if (text === "hypothesis testing") {
+    return "hypothesis_testing";
+  }
+  if (["permutations and combinations", "combinations", "permutations"].includes(text)) {
+    return "permutations_combinations";
+  }
+
+  return normalizeKey(text);
+}
+
+function cleanTopicText(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/&/g, " and ")
+    .replace(/[_-]+/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function normalizeKey(value) {
-  const normalized = String(value || "").trim().toLowerCase().replace(/\s+/g, "_");
+  const normalized = cleanTopicText(value).replace(/\s+/g, "_");
   if (!normalized || normalized === "unknown") {
     return "miscellaneous";
   }
   return normalized;
+}
+
+function compareTopicKeys(a, b) {
+  if (a === "miscellaneous" && b !== "miscellaneous") {
+    return 1;
+  }
+  if (b === "miscellaneous" && a !== "miscellaneous") {
+    return -1;
+  }
+  return formatTopic(a).localeCompare(formatTopic(b));
 }
 
 function compareQuestion(a, b) {
@@ -489,18 +646,24 @@ function shuffle(items) {
 }
 
 elements.paperSelect.addEventListener("change", () => {
+  syncAllSelectCountLabels();
   refreshDependentFilters({ resetTopic: true, resetDifficulty: true, resetMarks: true });
   resetPool({ randomize: false });
 });
 elements.topicSelect.addEventListener("change", () => {
+  syncAllSelectCountLabels();
   refreshDependentFilters({ resetDifficulty: true, resetMarks: true });
   resetPool({ randomize: false });
 });
 elements.difficultySelect.addEventListener("change", () => {
+  syncAllSelectCountLabels();
   populateMarksSelect();
   resetPool({ randomize: false });
 });
-elements.marksSelect.addEventListener("change", () => resetPool({ randomize: false }));
+elements.marksSelect.addEventListener("change", () => {
+  syncAllSelectCountLabels();
+  resetPool({ randomize: false });
+});
 elements.previousQuestion.addEventListener("click", previousQuestion);
 elements.randomQuestion.addEventListener("click", randomQuestion);
 elements.nextQuestion.addEventListener("click", nextQuestion);
