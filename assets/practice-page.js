@@ -32,8 +32,6 @@ const elements = {
   currentTopic: document.querySelector("#current-topic"),
   currentMarks: document.querySelector("#current-marks"),
   currentDifficulty: document.querySelector("#current-difficulty"),
-  warningBadge: document.querySelector("#warning-badge"),
-  deepseek: document.querySelector("#deepseek-metadata"),
 };
 
 const difficultyLabels = {
@@ -77,8 +75,6 @@ function normalizeQuestion(record) {
     marks: record.question_solution_marks,
     questionImage: imageUrl(record.question_image_path),
     markSchemeImage: imageUrl(record.mark_scheme_image_path),
-    validationStatus: record.validation_status,
-    notes: record.notes || {},
   };
 }
 
@@ -261,7 +257,6 @@ function randomQuestion() {
 
 function renderQuestion() {
   const question = state.current;
-  const enrichment = state.enrichments[question.id] || {};
   const difficulty = difficultyFor(question);
   setNavigationDisabled(false);
   elements.status.hidden = true;
@@ -275,59 +270,6 @@ function renderQuestion() {
   elements.currentTopic.textContent = `Topic: ${formatTopic(question.topic)}`;
   elements.currentMarks.textContent = question.marks ? `Marks: ${question.marks}` : "Marks: not detected";
   elements.currentDifficulty.textContent = `Difficulty: ${difficultyLabels[difficulty]}`;
-  renderWarning(question, enrichment);
-  renderDeepSeek(enrichment);
-}
-
-function renderWarning(question, enrichment) {
-  const reasons = warningReasons(question, enrichment);
-  if (!reasons.length) {
-    elements.warningBadge.hidden = true;
-    elements.warningBadge.textContent = "";
-    return;
-  }
-  elements.warningBadge.hidden = false;
-  elements.warningBadge.textContent = `Review warning: ${reasons.join(", ")}`;
-}
-
-function warningReasons(question, enrichment) {
-  const reasons = [];
-  if (question.validationStatus && question.validationStatus !== "pass") {
-    reasons.push(`validation ${question.validationStatus}`);
-  }
-  if (question.notes.mapping_status && question.notes.mapping_status !== "pass") {
-    reasons.push(`mapping ${question.notes.mapping_status}`);
-  }
-  if (question.notes.visual_curation_status === "fail") {
-    reasons.push("visual curation fail");
-  }
-  if (question.notes.text_only_status === "fail") {
-    reasons.push("text review fail");
-  }
-  if (enrichment.final_review_required === true) {
-    reasons.push("DeepSeek review required");
-  }
-  return reasons;
-}
-
-function renderDeepSeek(enrichment) {
-  const rows = [];
-  addDeepSeekRow(rows, "DeepSeek topic", enrichment.deepseek_topic);
-  addDeepSeekRow(rows, "Subtopic", enrichment.deepseek_subtopic);
-  addDeepSeekRow(rows, "Difficulty", enrichment.deepseek_difficulty);
-  addDeepSeekRow(rows, "Confidence", enrichment.deepseek_confidence_normalized);
-  addDeepSeekRow(rows, "Reconciliation", enrichment.topic_reconciliation_status);
-  if (enrichment.final_review_required === true) {
-    addDeepSeekRow(rows, "Review reasons", (enrichment.final_review_reasons || []).join(", "));
-  }
-  elements.deepseek.innerHTML = rows.join("");
-}
-
-function addDeepSeekRow(rows, label, value) {
-  if (value === undefined || value === null || value === "") {
-    return;
-  }
-  rows.push(`<span><strong>${escapeHtml(label)}:</strong> ${escapeHtml(String(value))}</span>`);
 }
 
 function renderEmpty(message) {
@@ -472,16 +414,6 @@ function shuffle(items) {
     const swapIndex = Math.floor(Math.random() * (index + 1));
     [items[index], items[swapIndex]] = [items[swapIndex], items[index]];
   }
-}
-
-function escapeHtml(value) {
-  return value.replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;",
-  })[character]);
 }
 
 elements.paperSelect.addEventListener("change", () => {

@@ -133,12 +133,6 @@ button:disabled {
   font-weight: 800;
 }
 
-.pill.warning {
-  border-color: rgba(157, 91, 0, 0.32);
-  background: rgba(255, 245, 220, 0.9);
-  color: var(--warning);
-}
-
 .viewer {
   overflow: hidden;
   border: 1px solid var(--line);
@@ -206,19 +200,6 @@ h1 {
   font-weight: 900;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-}
-
-.deepseek {
-  display: grid;
-  gap: 4px;
-  border-top: 1px solid var(--line);
-  padding: 14px 20px 18px;
-  color: var(--muted);
-  font-size: 14px;
-}
-
-.deepseek:empty {
-  display: none;
 }
 
 @media (max-width: 900px) {
