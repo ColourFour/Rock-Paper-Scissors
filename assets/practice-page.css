@@ -1,0 +1,259 @@
+:root {
+  color-scheme: light;
+  --paper: #fbf4e5;
+  --ink: #151711;
+  --muted: #696452;
+  --line: rgba(35, 30, 21, 0.14);
+  --card: rgba(255, 253, 246, 0.88);
+  --strong: #fffdf6;
+  --green: #0d695f;
+  --green-dark: #083f3a;
+  --orange: #de8b2c;
+  --warning: #9d5b00;
+  --danger: #9d2f1d;
+  --shadow: 0 24px 80px rgba(48, 35, 18, 0.16);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(222, 139, 44, 0.22), transparent 30rem),
+    radial-gradient(circle at 82% 8%, rgba(13, 105, 95, 0.16), transparent 30rem),
+    linear-gradient(135deg, #f4e5cc 0%, var(--paper) 48%, #edf4e9 100%);
+  color: var(--ink);
+  font-family: "Avenir Next", "Gill Sans", "Trebuchet MS", sans-serif;
+}
+
+button,
+select {
+  font: inherit;
+}
+
+.topbar {
+  position: sticky;
+  z-index: 5;
+  top: 0;
+  border-bottom: 1px solid var(--line);
+  background: rgba(251, 244, 229, 0.88);
+  backdrop-filter: blur(14px);
+}
+
+.nav {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 1fr) repeat(4, minmax(130px, auto)) repeat(3, auto);
+  gap: 12px;
+  align-items: center;
+  width: min(1440px, calc(100% - 28px));
+  margin: 0 auto;
+  padding: 12px 0;
+}
+
+.home {
+  border-radius: 999px;
+  color: var(--green-dark);
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.title {
+  min-width: 0;
+  overflow: hidden;
+  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  font-size: clamp(22px, 3vw, 34px);
+  font-weight: 700;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+select {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--strong);
+  color: var(--ink);
+  padding: 0 14px;
+}
+
+button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 900;
+  padding: 0 16px;
+  white-space: nowrap;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.primary {
+  background: var(--green);
+  color: white;
+}
+
+.primary:hover {
+  background: var(--green-dark);
+}
+
+.secondary {
+  border: 1px solid var(--line);
+  background: var(--strong);
+  color: var(--ink);
+}
+
+.shell {
+  width: min(1260px, calc(100% - 28px));
+  margin: 0 auto;
+  padding: 24px 0 56px;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.pill {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 253, 246, 0.72);
+  color: var(--muted);
+  padding: 8px 12px;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.pill.warning {
+  border-color: rgba(157, 91, 0, 0.32);
+  background: rgba(255, 245, 220, 0.9);
+  color: var(--warning);
+}
+
+.viewer {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 30px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+
+.viewer-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+  padding: 18px 20px;
+}
+
+h1 {
+  margin: 0;
+  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  font-size: clamp(28px, 4vw, 48px);
+  letter-spacing: 0;
+}
+
+.status {
+  padding: 28px;
+  color: var(--muted);
+}
+
+.status.error {
+  color: var(--danger);
+}
+
+.image-wrap {
+  padding: 18px;
+}
+
+.image-frame {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: white;
+}
+
+.image-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.solution {
+  display: none;
+  border-top: 1px solid var(--line);
+}
+
+.solution.visible {
+  display: block;
+}
+
+.solution-label {
+  margin: 0;
+  padding: 18px 20px 0;
+  color: var(--green-dark);
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.deepseek {
+  display: grid;
+  gap: 4px;
+  border-top: 1px solid var(--line);
+  padding: 14px 20px 18px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.deepseek:empty {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .nav {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .title {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .home {
+    grid-row: 2;
+  }
+}
+
+@media (max-width: 620px) {
+  .nav {
+    grid-template-columns: 1fr;
+  }
+
+  .title,
+  .home {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  button,
+  select {
+    width: 100%;
+  }
+
+  .viewer-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

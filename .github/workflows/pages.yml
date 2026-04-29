@@ -36,15 +36,14 @@ jobs:
           if [ -d assets ]; then
             cp -R assets _site/assets
           fi
-          if [ -d practice ]; then
-            cp -R practice _site/practice
-          fi
-          mkdir -p _site/output
-          for paper_dir in output/p1 output/p3 output/p4 output/p5; do
-            if [ -d "$paper_dir" ]; then
-              cp -R "$paper_dir" _site/output/
+          for page_dir in p1 p3 p4 p5 data; do
+            if [ -d "$page_dir" ]; then
+              cp -R "$page_dir" _site/
             fi
           done
+          if [ -f REBUILD_NOTES.md ]; then
+            cp REBUILD_NOTES.md _site/REBUILD_NOTES.md
+          fi
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

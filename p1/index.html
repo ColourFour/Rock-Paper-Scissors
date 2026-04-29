@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pure Mathematics 1 Practice</title>
+    <link rel="stylesheet" href="../assets/practice-page.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <nav class="nav" aria-label="Practice controls">
+        <a class="home" href="../">Back home</a>
+        <div class="title" id="paper-family-title">Pure Mathematics 1</div>
+        <select id="paper-select" aria-label="Choose a paper">
+          <option value="all">All papers</option>
+        </select>
+        <select id="topic-select" aria-label="Choose a topic">
+          <option value="all">All topics</option>
+        </select>
+        <select id="difficulty-select" aria-label="Choose a difficulty">
+          <option value="all">All difficulties</option>
+        </select>
+        <select id="marks-select" aria-label="Choose a mark total">
+          <option value="all">All marks</option>
+        </select>
+        <button class="secondary" id="previous-question" type="button">Previous question</button>
+        <button class="secondary" id="random-question" type="button">Random question</button>
+        <button class="primary" id="next-question" type="button">Next question</button>
+      </nav>
+    </header>
+
+    <main class="shell">
+      <section class="meta" aria-label="Current question details">
+        <span class="pill" id="current-paper">Paper: ...</span>
+        <span class="pill" id="current-question">Question: ...</span>
+        <span class="pill" id="current-topic">Topic: ...</span>
+        <span class="pill" id="current-marks">Marks: ...</span>
+        <span class="pill" id="current-difficulty">Difficulty: ...</span>
+        <span class="pill warning" id="warning-badge" hidden></span>
+      </section>
+
+      <section class="viewer" aria-live="polite">
+        <div id="status" class="status">Loading practice questions...</div>
+        <div id="question-card" hidden>
+          <div class="viewer-head">
+            <h1 id="question-title">Question</h1>
+            <button class="primary" id="check-solution" type="button">Check solution</button>
+          </div>
+          <div class="image-wrap">
+            <div class="image-frame">
+              <img id="question-image" alt="Question image">
+            </div>
+          </div>
+          <div class="deepseek" id="deepseek-metadata"></div>
+          <div class="solution" id="solution">
+            <p class="solution-label">Mark scheme</p>
+            <div class="image-wrap">
+              <div class="image-frame">
+                <img id="solution-image" alt="Mark scheme image">
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      window.EXAM_FAMILY = "p1";
+      window.EXAM_TITLE = "Pure Mathematics 1";
+    </script>
+    <script src="../assets/practice-page.js"></script>
+  </body>
+</html>
