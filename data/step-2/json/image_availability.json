@@ -1,0 +1,11 @@
+{
+  "generatedFrom": "data/step-2/json/question_bank.json",
+  "missing": {
+    "12autumn21_q12": {
+      "question_image_path": "p1/12autumn21/questions/q12.png",
+      "mark_scheme_image_path": "p1/12autumn21/mark_scheme/q12.png",
+      "question_image_exists": true,
+      "mark_scheme_image_exists": false
+    }
+  }
+}

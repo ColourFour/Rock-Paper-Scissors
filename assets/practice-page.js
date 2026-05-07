@@ -36,14 +36,18 @@ const elements = {
   footerQuote: document.querySelector("#footer-quote"),
 };
 
-const difficultyLabels = {
-  easy: "Easy",
-  average: "Average",
-  difficult: "Difficult",
-  miscellaneous: "Miscellaneous",
-};
-
-const difficultyOrder = ["easy", "average", "difficult", "miscellaneous"];
+const difficultyBands = [
+  { value: "0-20", label: "0-20", min: 0, max: 20 },
+  { value: "21-40", label: "21-40", min: 21, max: 40 },
+  { value: "41-60", label: "41-60", min: 41, max: 60 },
+  { value: "61-80", label: "61-80", min: 61, max: 80 },
+  { value: "81-100", label: "81-100", min: 81, max: 100 },
+];
+const difficultyLabels = Object.fromEntries([
+  ...difficultyBands.map((band) => [band.value, band.label]),
+  ["miscellaneous", "Miscellaneous"],
+]);
+const difficultyOrder = [...difficultyBands.map((band) => band.value), "miscellaneous"];
 const quotes = [
   "Pressure means you are in the game.",
   "Hard questions make strong mathematicians.",
@@ -61,9 +65,10 @@ const initialFilters = {
   difficulty: queryFilters.get("difficulty") || "all",
   marks: queryFilters.get("marks") || "all",
 };
+const dataRoot = window.PRACTICE_DATA_ROOT || "../data/step-2";
 
 function imageUrl(path) {
-  return `../data/images/${path}`;
+  return `${dataRoot}/${path}`;
 }
 
 async function loadJson(path, optional = false) {
@@ -85,6 +90,7 @@ function normalizeQuestion(record) {
     questionNumber: String(record.question_number),
     topic: record.topic || "unknown",
     marks: record.question_solution_marks,
+    difficultyScore: record.difficulty_score,
     questionImage: imageUrl(record.question_image_path),
     markSchemeImage: imageUrl(record.mark_scheme_image_path),
   };
@@ -95,6 +101,12 @@ function hasImages(record) {
     return false;
   }
   if (!state.imageAvailability) {
+    return true;
+  }
+  if (state.imageAvailability.missing?.[record.question_id]) {
+    return false;
+  }
+  if (!state.imageAvailability.available) {
     return true;
   }
   return state.imageAvailability.available?.[record.question_id] === true;
@@ -275,7 +287,8 @@ function randomQuestion() {
 
 function renderQuestion() {
   const question = state.current;
-  const difficulty = difficultyFor(question);
+  const difficultyScore = difficultyScoreFor(question);
+  const difficulty = difficultyBandFor(difficultyScore);
   setNavigationDisabled(false);
   elements.status.hidden = true;
   elements.card.hidden = false;
@@ -287,7 +300,7 @@ function renderQuestion() {
   elements.currentQuestion.textContent = `Question: ${question.questionNumber}`;
   elements.currentTopic.textContent = `Topic: ${formatTopic(topicKeyFor(question))}`;
   elements.currentMarks.textContent = `Marks: ${formatMarksGroup(marksGroupFor(question))}`;
-  elements.currentDifficulty.textContent = `Difficulty: ${difficultyLabels[difficulty]}`;
+  elements.currentDifficulty.textContent = `Difficulty: ${formatDifficulty(difficulty, difficultyScore)}`;
 }
 
 function renderEmpty(message) {
@@ -320,22 +333,56 @@ function setNavigationDisabled(disabled) {
 }
 
 function difficultyFor(question) {
-  const enrichment = state.enrichments[question.id] || {};
-  return normalizeDifficulty(enrichment.deepseek_difficulty_normalized || enrichment.deepseek_difficulty || "miscellaneous");
+  return difficultyBandFor(difficultyScoreFor(question));
 }
 
-function normalizeDifficulty(value) {
-  const normalized = normalizeKey(value);
-  if (normalized === "easy") {
-    return "easy";
+function difficultyScoreFor(question) {
+  const enrichment = state.enrichments[question.id] || {};
+  const candidates = [enrichment.deepseek_difficulty_score, enrichment.deepseek_difficulty, question.difficultyScore];
+  for (const candidate of candidates) {
+    const score = Number(candidate);
+    if (Number.isFinite(score)) {
+      return score;
+    }
   }
-  if (["average", "medium", "moderate"].includes(normalized)) {
-    return "average";
+  return null;
+}
+
+function difficultyBandFor(score) {
+  if (!Number.isFinite(score)) {
+    return "miscellaneous";
   }
-  if (["difficult", "hard"].includes(normalized)) {
-    return "difficult";
+  const band = difficultyBands.find((item) => score >= item.min && score <= item.max);
+  return band?.value || "miscellaneous";
+}
+
+function formatDifficulty(band, score) {
+  const label = difficultyLabels[band] || difficultyLabels.miscellaneous;
+  if (!Number.isFinite(score)) {
+    return label;
   }
-  return "miscellaneous";
+  return `${label} (score ${formatScore(score)})`;
+}
+
+function formatScore(score) {
+  return Number.isInteger(score) ? String(score) : score.toFixed(1);
+}
+
+function normalizeInitialDifficulty(value) {
+  if (value === "all") {
+    return "all";
+  }
+  if (difficultyLabels[value]) {
+    return value;
+  }
+  const score = Number(value);
+  if (Number.isFinite(score)) {
+    return difficultyBandFor(score);
+  }
+  if (normalizeKey(value) === "miscellaneous") {
+    return "miscellaneous";
+  }
+  return "all";
 }
 
 function topicKeyFor(question) {
@@ -403,13 +450,6 @@ function applyInitialFilters() {
   populateMarksSelect();
   setSelectValue(elements.marksSelect, normalizeInitialMarks(initialFilters.marks));
   syncAllSelectCountLabels();
-}
-
-function normalizeInitialDifficulty(value) {
-  if (value === "all") {
-    return "all";
-  }
-  return normalizeDifficulty(value);
 }
 
 function normalizeInitialMarks(value) {
@@ -836,9 +876,9 @@ elements.nextQuestion.addEventListener("click", nextQuestion);
 elements.checkSolution.addEventListener("click", toggleSolution);
 
 Promise.all([
-  loadJson("../data/json/question_bank.json"),
-  loadJson("../data/json/question_bank.deepseek.full.json", true),
-  loadJson("../data/json/image_availability.json", true),
+  loadJson(`${dataRoot}/json/question_bank.json`),
+  loadJson(`${dataRoot}/json/question_bank.deepseek.json`, true),
+  loadJson(`${dataRoot}/json/image_availability.json`, true),
 ])
   .then(([bank, deepseek, imageAvailability]) => {
     state.enrichments = deepseek?.enrichments || {};
