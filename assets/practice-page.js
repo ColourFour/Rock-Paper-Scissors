@@ -4,7 +4,7 @@ const compactFamilyTitle = window.EXAM_COMPACT_TITLE || familyTitle;
 
 const state = {
   allQuestions: [],
-  enrichments: {},
+  topicRoutes: {},
   imageAvailability: null,
   pool: [],
   index: 0,
@@ -16,7 +16,6 @@ const elements = {
   title: document.querySelector("#paper-family-title"),
   paperSelect: document.querySelector("#paper-select"),
   topicSelect: document.querySelector("#topic-select"),
-  difficultySelect: document.querySelector("#difficulty-select"),
   marksSelect: document.querySelector("#marks-select"),
   previousQuestion: document.querySelector("#previous-question"),
   randomQuestion: document.querySelector("#random-question"),
@@ -32,22 +31,161 @@ const elements = {
   currentQuestion: document.querySelector("#current-question"),
   currentTopic: document.querySelector("#current-topic"),
   currentMarks: document.querySelector("#current-marks"),
-  currentDifficulty: document.querySelector("#current-difficulty"),
   footerQuote: document.querySelector("#footer-quote"),
 };
 
-const difficultyBands = [
-  { value: "0-20", label: "0-20", min: 0, max: 20 },
-  { value: "21-40", label: "21-40", min: 21, max: 40 },
-  { value: "41-60", label: "41-60", min: 41, max: 60 },
-  { value: "61-80", label: "61-80", min: 61, max: 80 },
-  { value: "81-100", label: "81-100", min: 81, max: 100 },
-];
-const difficultyLabels = Object.fromEntries([
-  ...difficultyBands.map((band) => [band.value, band.label]),
-  ["miscellaneous", "Miscellaneous"],
-]);
-const difficultyOrder = [...difficultyBands.map((band) => band.value), "miscellaneous"];
+const topicTaxonomies = {
+  p1: [
+    { key: "quadratics", label: "Quadratics" },
+    { key: "functions", label: "Functions" },
+    { key: "coordinate_geometry", label: "Coordinate geometry" },
+    { key: "circular_measure", label: "Circular measure" },
+    { key: "trigonometry", label: "Trigonometry" },
+    { key: "series", label: "Series" },
+    { key: "differentiation", label: "Differentiation" },
+    { key: "integration", label: "Integration" },
+  ],
+  p3: [
+    { key: "algebra", label: "Algebra" },
+    { key: "logarithmic_exponential_functions", label: "Logarithmic and exponential functions" },
+    { key: "trigonometry", label: "Trigonometry" },
+    { key: "differentiation", label: "Differentiation" },
+    { key: "integration", label: "Integration" },
+    { key: "numerical_solution_equations", label: "Numerical solution of equations" },
+    { key: "vectors", label: "Vectors" },
+    { key: "differential_equations", label: "Differential equations" },
+    { key: "complex_numbers", label: "Complex numbers" },
+  ],
+  p4: [
+    { key: "forces_equilibrium", label: "Forces and equilibrium" },
+    { key: "kinematics_motion_straight_line", label: "Kinematics of motion in a straight line" },
+    { key: "momentum", label: "Momentum" },
+    { key: "newtons_laws_motion", label: "Newton's laws of motion" },
+    { key: "energy_work_power", label: "Energy, work and power" },
+  ],
+  p5: [
+    { key: "representation_data", label: "Representation of data" },
+    { key: "permutations_combinations", label: "Permutations and combinations" },
+    { key: "probability", label: "Probability" },
+    { key: "discrete_random_variables", label: "Discrete random variables" },
+    { key: "normal_distribution", label: "The normal distribution" },
+  ],
+};
+
+const topicAliases = {
+  p1: {
+    "9709_p1_topic_quadratics": "quadratics",
+    "9709_p1_topic_functions": "functions",
+    "9709_p1_topic_coordinate_geometry": "coordinate_geometry",
+    "9709_p1_topic_circular_measure": "circular_measure",
+    "9709_p1_topic_trigonometry": "trigonometry",
+    "9709_p1_topic_series": "series",
+    "9709_p1_topic_differentiation": "differentiation",
+    "9709_p1_topic_integration": "integration",
+    algebra: "quadratics",
+    binomial_expansion: "series",
+    circular_measure: "circular_measure",
+    coordinate_geometry: "coordinate_geometry",
+    differentiation: "differentiation",
+    differentiation_integration: "differentiation",
+    functions: "functions",
+    integration: "integration",
+    quadratics: "quadratics",
+    series: "series",
+    series_and_sequences: "series",
+    series_sequences: "series",
+    trigonometry: "trigonometry",
+  },
+  p3: {
+    "9709_p3_topic_algebra": "algebra",
+    "9709_p3_topic_logarithmic_and_exponential_functions": "logarithmic_exponential_functions",
+    "9709_p3_topic_trigonometry": "trigonometry",
+    "9709_p3_topic_differentiation": "differentiation",
+    "9709_p3_topic_integration": "integration",
+    "9709_p3_topic_numerical_solution_of_equations": "numerical_solution_equations",
+    "9709_p3_topic_vectors": "vectors",
+    "9709_p3_topic_differential_equations": "differential_equations",
+    "9709_p3_topic_complex_numbers": "complex_numbers",
+    algebra: "algebra",
+    binomial_expansion: "algebra",
+    complex_numbers: "complex_numbers",
+    differential_equations: "differential_equations",
+    differentiation: "differentiation",
+    functions: "algebra",
+    integration: "integration",
+    logarithmic_and_exponential_functions: "logarithmic_exponential_functions",
+    logarithmic_exponential_functions: "logarithmic_exponential_functions",
+    logarithms_and_exponentials: "logarithmic_exponential_functions",
+    logarithms_exponentials: "logarithmic_exponential_functions",
+    modulus: "algebra",
+    modulus_functions: "algebra",
+    numerical_methods: "numerical_solution_equations",
+    numerical_solution_equations: "numerical_solution_equations",
+    numerical_solution_of_equations: "numerical_solution_equations",
+    parametric_equations: "differentiation",
+    partial_fractions: "algebra",
+    polynomials: "algebra",
+    trigonometry: "trigonometry",
+    vectors: "vectors",
+  },
+  p4: {
+    "9709_m1_topic_forces_and_equilibrium": "forces_equilibrium",
+    "9709_m1_topic_kinematics_of_motion_in_a_straight_line": "kinematics_motion_straight_line",
+    "9709_m1_topic_momentum": "momentum",
+    "9709_m1_topic_newtons_laws_of_motion": "newtons_laws_motion",
+    "9709_m1_topic_energy_work_and_power": "energy_work_power",
+    connected_particles: "newtons_laws_motion",
+    energy_work_power: "energy_work_power",
+    equilibrium_coplanar_forces: "forces_equilibrium",
+    equilibrium_particle: "forces_equilibrium",
+    forces_and_equilibrium: "forces_equilibrium",
+    forces_equilibrium: "forces_equilibrium",
+    forces_newtons_laws: "newtons_laws_motion",
+    forces_newtons_second_law: "newtons_laws_motion",
+    friction: "forces_equilibrium",
+    friction_rough_plane: "forces_equilibrium",
+    kinematics: "kinematics_motion_straight_line",
+    kinematics_constant_acceleration: "kinematics_motion_straight_line",
+    kinematics_graphs: "kinematics_motion_straight_line",
+    kinematics_motion_straight_line: "kinematics_motion_straight_line",
+    kinematics_variable_functions: "kinematics_motion_straight_line",
+    momentum: "momentum",
+    momentum_impulse: "momentum",
+    newtons_laws_motion: "newtons_laws_motion",
+    newtons_laws_of_motion: "newtons_laws_motion",
+    power_and_resistance: "energy_work_power",
+    rough_plane_energy: "energy_work_power",
+    work_energy_power: "energy_work_power",
+  },
+  p5: {
+    "9709_s1_topic_representation_of_data": "representation_data",
+    "9709_s1_topic_permutations_and_combinations": "permutations_combinations",
+    "9709_s1_topic_probability": "probability",
+    "9709_s1_topic_discrete_random_variables": "discrete_random_variables",
+    "9709_s1_topic_the_normal_distribution": "normal_distribution",
+    binomial_distribution: "discrete_random_variables",
+    data_representation: "representation_data",
+    discrete_random_variables: "discrete_random_variables",
+    geometric_distribution: "discrete_random_variables",
+    measures_of_central_tendency_and_dispersion: "representation_data",
+    normal_distribution: "normal_distribution",
+    permutations_and_combinations: "permutations_combinations",
+    permutations_combinations: "permutations_combinations",
+    probability: "probability",
+    probability_distributions: "discrete_random_variables",
+    representation_data: "representation_data",
+    representation_of_data: "representation_data",
+    statistics: "representation_data",
+    the_normal_distribution: "normal_distribution",
+  },
+};
+
+const topicLabels = Object.fromEntries(
+  Object.values(topicTaxonomies)
+    .flat()
+    .map((topic) => [topic.key, topic.label]),
+);
+
 const quotes = [
   "Pressure means you are in the game.",
   "Hard questions make strong mathematicians.",
@@ -58,14 +196,15 @@ const quotes = [
   "Show your method. Trust your training.",
   "Make the hard thing familiar.",
 ];
+
 const queryFilters = new URLSearchParams(window.location.search);
 const initialFilters = {
   paper: queryFilters.get("paper") || "all",
   topic: queryFilters.get("topic") || "all",
-  difficulty: queryFilters.get("difficulty") || "all",
   marks: queryFilters.get("marks") || "all",
 };
-const dataRoot = window.PRACTICE_DATA_ROOT || "../data/step-2";
+const dataRoot = window.PRACTICE_DATA_ROOT || "../data/step-3";
+const imageAvailabilityPath = window.PRACTICE_IMAGE_AVAILABILITY_PATH || "";
 
 function imageUrl(path) {
   return `${dataRoot}/${path}`;
@@ -82,6 +221,21 @@ async function loadJson(path, optional = false) {
   return response.json();
 }
 
+async function loadFirstJson(paths, optional = false) {
+  const errors = [];
+  for (const path of paths) {
+    try {
+      return await loadJson(path);
+    } catch (error) {
+      errors.push(error.message);
+    }
+  }
+  if (optional) {
+    return null;
+  }
+  throw new Error(errors[errors.length - 1] || `Could not load ${paths[0]}`);
+}
+
 function normalizeQuestion(record) {
   return {
     id: record.question_id,
@@ -90,7 +244,6 @@ function normalizeQuestion(record) {
     questionNumber: String(record.question_number),
     topic: record.topic || "unknown",
     marks: record.question_solution_marks,
-    difficultyScore: record.difficulty_score,
     questionImage: imageUrl(record.question_image_path),
     markSchemeImage: imageUrl(record.mark_scheme_image_path),
   };
@@ -134,18 +287,9 @@ function questionsForPaperAndTopicSelection() {
   return questions.filter((question) => topicKeyFor(question) === selectedTopic);
 }
 
-function questionsForPaperTopicAndDifficultySelection() {
-  const selectedDifficulty = elements.difficultySelect.value;
-  const questions = questionsForPaperAndTopicSelection();
-  if (selectedDifficulty === "all") {
-    return questions;
-  }
-  return questions.filter((question) => difficultyFor(question) === selectedDifficulty);
-}
-
 function questionsForSelection() {
   const selectedMarks = elements.marksSelect.value;
-  const questions = questionsForPaperTopicAndDifficultySelection();
+  const questions = questionsForPaperAndTopicSelection();
   if (selectedMarks === "all") {
     return questions;
   }
@@ -168,33 +312,19 @@ function populateTopicSelect() {
   const previousValue = elements.topicSelect.value;
   const questions = questionsForPaperSelection();
   const topicCounts = countBy(questions, topicKeyFor);
-  const topics = [...topicCounts.keys()].sort(compareTopicKeys);
+  const topics = topicTaxonomyFor(family);
   elements.topicSelect.innerHTML = "";
   appendCountedOption(elements.topicSelect, "all", "All topics", questions.length);
   topics.forEach((topic) => {
-    appendCountedOption(elements.topicSelect, topic, formatTopic(topic), topicCounts.get(topic));
+    appendCountedOption(elements.topicSelect, topic.key, topic.label, topicCounts.get(topic.key) || 0);
   });
-  elements.topicSelect.value = previousValue === "all" || topics.includes(previousValue) ? previousValue : "all";
+  elements.topicSelect.value = previousValue === "all" || topics.some((topic) => topic.key === previousValue) ? previousValue : "all";
   syncSelectCountLabels(elements.topicSelect);
-}
-
-function populateDifficultySelect() {
-  const previousValue = elements.difficultySelect.value;
-  const questions = questionsForPaperAndTopicSelection();
-  const difficultyCounts = countBy(questions, difficultyFor);
-  const available = new Set(difficultyCounts.keys());
-  elements.difficultySelect.innerHTML = "";
-  appendCountedOption(elements.difficultySelect, "all", "All difficulties", questions.length);
-  difficultyOrder.forEach((difficulty) => {
-    appendCountedOption(elements.difficultySelect, difficulty, difficultyLabels[difficulty], difficultyCounts.get(difficulty) || 0);
-  });
-  elements.difficultySelect.value = previousValue === "all" || available.has(previousValue) ? previousValue : "all";
-  syncSelectCountLabels(elements.difficultySelect);
 }
 
 function populateMarksSelect() {
   const previousValue = elements.marksSelect.value;
-  const questions = questionsForPaperTopicAndDifficultySelection();
+  const questions = questionsForPaperAndTopicSelection();
   const markCounts = countBy(questions, marksGroupFor);
   const markValues = [...markCounts.keys()];
   const numericMarks = markValues
@@ -222,15 +352,11 @@ function populateMarksSelect() {
   syncSelectCountLabels(elements.marksSelect);
 }
 
-function refreshDependentFilters({ resetTopic = false, resetDifficulty = false, resetMarks = false } = {}) {
+function refreshDependentFilters({ resetTopic = false, resetMarks = false } = {}) {
   if (resetTopic) {
     elements.topicSelect.value = "all";
   }
   populateTopicSelect();
-  if (resetDifficulty) {
-    elements.difficultySelect.value = "all";
-  }
-  populateDifficultySelect();
   if (resetMarks) {
     elements.marksSelect.value = "all";
   }
@@ -287,8 +413,6 @@ function randomQuestion() {
 
 function renderQuestion() {
   const question = state.current;
-  const difficultyScore = difficultyScoreFor(question);
-  const difficulty = difficultyBandFor(difficultyScore);
   setNavigationDisabled(false);
   elements.status.hidden = true;
   elements.card.hidden = false;
@@ -300,7 +424,6 @@ function renderQuestion() {
   elements.currentQuestion.textContent = `Question: ${question.questionNumber}`;
   elements.currentTopic.textContent = `Topic: ${formatTopic(topicKeyFor(question))}`;
   elements.currentMarks.textContent = `Marks: ${formatMarksGroup(marksGroupFor(question))}`;
-  elements.currentDifficulty.textContent = `Difficulty: ${formatDifficulty(difficulty, difficultyScore)}`;
 }
 
 function renderEmpty(message) {
@@ -332,62 +455,26 @@ function setNavigationDisabled(disabled) {
   elements.nextQuestion.disabled = disabled;
 }
 
-function difficultyFor(question) {
-  return difficultyBandFor(difficultyScoreFor(question));
-}
-
-function difficultyScoreFor(question) {
-  const enrichment = state.enrichments[question.id] || {};
-  const candidates = [enrichment.deepseek_difficulty_score, enrichment.deepseek_difficulty, question.difficultyScore];
-  for (const candidate of candidates) {
-    const score = Number(candidate);
-    if (Number.isFinite(score)) {
-      return score;
-    }
-  }
-  return null;
-}
-
-function difficultyBandFor(score) {
-  if (!Number.isFinite(score)) {
-    return "miscellaneous";
-  }
-  const band = difficultyBands.find((item) => score >= item.min && score <= item.max);
-  return band?.value || "miscellaneous";
-}
-
-function formatDifficulty(band, score) {
-  const label = difficultyLabels[band] || difficultyLabels.miscellaneous;
-  if (!Number.isFinite(score)) {
-    return label;
-  }
-  return `${label} (score ${formatScore(score)})`;
-}
-
-function formatScore(score) {
-  return Number.isInteger(score) ? String(score) : score.toFixed(1);
-}
-
-function normalizeInitialDifficulty(value) {
-  if (value === "all") {
-    return "all";
-  }
-  if (difficultyLabels[value]) {
-    return value;
-  }
-  const score = Number(value);
-  if (Number.isFinite(score)) {
-    return difficultyBandFor(score);
-  }
-  if (normalizeKey(value) === "miscellaneous") {
-    return "miscellaneous";
-  }
-  return "all";
-}
-
 function topicKeyFor(question) {
-  const enrichment = state.enrichments[question.id] || {};
-  return normalizeTopic(enrichment.deepseek_topic_normalized || enrichment.deepseek_topic || question.topic || "miscellaneous", question.paperFamily);
+  const route = state.topicRoutes[question.id] || {};
+  return forceTopic(route.primary_topic_id || question.topic, question.paperFamily);
+}
+
+function forceTopic(value, paperFamily = family) {
+  const aliases = topicAliases[paperFamily] || {};
+  return aliases[normalizeKey(value)] || defaultTopicFor(paperFamily);
+}
+
+function topicTaxonomyFor(paperFamily = family) {
+  return topicTaxonomies[paperFamily] || [];
+}
+
+function defaultTopicFor(paperFamily = family) {
+  return topicTaxonomyFor(paperFamily)[0]?.key || "topic";
+}
+
+function formatTopic(topic) {
+  return topicLabels[topic] || String(topic || "Topic");
 }
 
 function marksGroupFor(question) {
@@ -438,18 +525,24 @@ function syncSelectCountLabels(select) {
 }
 
 function syncAllSelectCountLabels() {
-  [elements.paperSelect, elements.topicSelect, elements.difficultySelect, elements.marksSelect].forEach(syncSelectCountLabels);
+  [elements.paperSelect, elements.topicSelect, elements.marksSelect].forEach(syncSelectCountLabels);
 }
 
 function applyInitialFilters() {
   setSelectValue(elements.paperSelect, initialFilters.paper);
   refreshDependentFilters();
-  setSelectValue(elements.topicSelect, normalizeTopic(initialFilters.topic, family));
-  refreshDependentFilters();
-  setSelectValue(elements.difficultySelect, normalizeInitialDifficulty(initialFilters.difficulty));
+  setSelectValue(elements.topicSelect, normalizeInitialTopic(initialFilters.topic));
   populateMarksSelect();
   setSelectValue(elements.marksSelect, normalizeInitialMarks(initialFilters.marks));
   syncAllSelectCountLabels();
+}
+
+function normalizeInitialTopic(value) {
+  if (value === "all") {
+    return "all";
+  }
+  const aliases = topicAliases[family] || {};
+  return aliases[normalizeKey(value)] || "all";
 }
 
 function normalizeInitialMarks(value) {
@@ -474,7 +567,6 @@ function updateUrlParams() {
   const params = new URLSearchParams();
   setQueryParam(params, "paper", elements.paperSelect.value);
   setQueryParam(params, "topic", elements.topicSelect.value);
-  setQueryParam(params, "difficulty", elements.difficultySelect.value);
   setQueryParam(params, "marks", elements.marksSelect.value);
   const query = params.toString();
   const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
@@ -487,299 +579,11 @@ function setQueryParam(params, key, value) {
   }
 }
 
-function formatTopic(topic) {
-  const labels = {
-    binomial_expansion: "Binomial expansion",
-    binomial_distribution: "Binomial distribution",
-    circular_measure: "Circular measure",
-    connected_particles: "Connected particles",
-    coordinate_geometry: "Coordinate geometry",
-    complex_numbers: "Complex numbers",
-    differential_equations: "Differential equations",
-    differentiation_integration: "Differentiation and integration",
-    discrete_random_variables: "Discrete random variables",
-    forces_newtons_laws: "Forces and Newton's laws",
-    hypothesis_testing: "Hypothesis testing",
-    logarithms_exponentials: "Logarithms and exponentials",
-    modulus_functions: "Modulus functions",
-    normal_distribution: "Normal distribution",
-    numerical_methods: "Numerical methods",
-    parametric_equations: "Parametric equations",
-    permutations_combinations: "Permutations and combinations",
-    series_sequences: "Series and sequences",
-    work_energy_power: "Work, energy and power",
-  };
-  if (labels[topic]) {
-    return labels[topic];
-  }
-  return String(topic || "miscellaneous")
-    .replaceAll("_", " ")
-    .toLowerCase()
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function normalizeTopic(value, paperFamily = family) {
-  const text = cleanTopicText(value);
-  if (!text || text === "unknown" || text === "miscellaneous") {
-    return "miscellaneous";
-  }
-
-  if (paperFamily === "p1") {
-    return normalizeP1Topic(text);
-  }
-  if (paperFamily === "p3") {
-    return normalizeP3Topic(text);
-  }
-  if (paperFamily === "p5") {
-    return normalizeP5Topic(text);
-  }
-  if (paperFamily === "p4") {
-    return normalizeP4Topic(text);
-  }
-
-  return normalizeGeneralTopic(text);
-}
-
-function normalizeP1Topic(text) {
-  if (["binomial expansion", "binomial theorem"].includes(text)) {
-    return "binomial_expansion";
-  }
-  if (["circular measure", "radians", "sectors", "arc length"].includes(text)) {
-    return "circular_measure";
-  }
-  if (["coordinate geometry", "geometry", "circles", "circle", "equation of circle", "straight line", "line and circle"].includes(text)) {
-    return "coordinate_geometry";
-  }
-  if (["quadratics", "quadratic functions", "quadratic equations", "discriminant", "completing the square"].includes(text)) {
-    return "quadratics";
-  }
-  if (["functions", "function transformations", "transformations", "graph transformations", "inverse functions", "composite functions"].includes(text)) {
-    return "functions";
-  }
-  if (text === "differentiation and integration" || hasBoth(text, "differentiation", "integration")) {
-    return "differentiation_integration";
-  }
-  if (["integration", "definite integration", "indefinite integration", "area under curve"].includes(text)) {
-    return "integration";
-  }
-  if (["differentiation", "derivatives", "applications of differentiation", "calculus"].includes(text)) {
-    return "differentiation";
-  }
-  if (["trigonometry", "trigonometric equations", "trig equations", "trigonometric identities", "trig identities", "sine cosine tangent"].includes(text)) {
-    return "trigonometry";
-  }
-  if (["series and sequences", "sequences and series", "arithmetic progression", "geometric progression", "summation notation"].includes(text)) {
-    return "series_sequences";
-  }
-  if (["algebra", "equations", "inequalities", "manipulation", "partial fractions"].includes(text)) {
-    return "algebra";
-  }
-  return normalizeGeneralTopic(text);
-}
-
-function normalizeP3Topic(text) {
-  if (["algebra", "polynomials", "polynomial", "partial fractions", "rational functions"].includes(text)) {
-    return "algebra";
-  }
-  if (["absolute value functions", "absolute value functions and inequalities", "modulus functions", "modulus inequalities"].includes(text)) {
-    return "modulus_functions";
-  }
-  if (["binomial expansion", "binomial theorem"].includes(text)) {
-    return "binomial_expansion";
-  }
-  if (["complex numbers", "complex number", "argand diagram", "roots of complex numbers"].includes(text)) {
-    return "complex_numbers";
-  }
-  if (["differentiation", "implicit differentiation", "derivatives", "applications of differentiation", "parametric differentiation"].includes(text)) {
-    return "differentiation";
-  }
-  if (["integration", "definite integration", "indefinite integration", "area under curve", "integration techniques"].includes(text)) {
-    return "integration";
-  }
-  if (text === "differentiation and integration" || hasBoth(text, "differentiation", "integration")) {
-    return "differentiation_integration";
-  }
-  if (["differential equations", "first order differential equations", "separable differential equations"].includes(text)) {
-    return "differential_equations";
-  }
-  if ([
-    "logarithms and exponentials",
-    "exponential and logarithmic functions",
-    "logarithms",
-    "exponentials",
-    "exponential functions",
-    "logarithmic functions",
-  ].includes(text)) {
-    return "logarithms_exponentials";
-  }
-  if (["numerical methods", "iteration", "root finding", "newton raphson"].includes(text)) {
-    return "numerical_methods";
-  }
-  if (["parametric equations", "parametric"].includes(text)) {
-    return "parametric_equations";
-  }
-  if (["trigonometry", "trigonometric equations", "trigonometric identities", "trig identities", "inverse trig"].includes(text)) {
-    return "trigonometry";
-  }
-  if (["vectors", "vector geometry", "scalar product"].includes(text)) {
-    return "vectors";
-  }
-  if (["functions", "inverse functions", "composite functions", "transformations"].includes(text)) {
-    return "functions";
-  }
-  if (text === "calculus") {
-    return "differentiation_integration";
-  }
-  return normalizeGeneralTopic(text);
-}
-
-function normalizeP5Topic(text) {
-  if ([
-    "probability",
-    "conditional probability",
-    "independent events",
-    "mutually exclusive",
-    "probability and statistics",
-    "probability and statistics 1",
-  ].includes(text)) {
-    return "probability";
-  }
-  if (["permutations and combinations", "permutation", "combination", "counting"].includes(text)) {
-    return "permutations_combinations";
-  }
-  if ([
-    "discrete random variables",
-    "discrete probability distributions",
-    "random variables",
-    "probability distributions",
-    "summation notation",
-  ].includes(text)) {
-    return "discrete_random_variables";
-  }
-  if (["binomial distribution", "binomial probability"].includes(text)) {
-    return "binomial_distribution";
-  }
-  if (["normal distribution", "the normal distribution", "normal probabilities"].includes(text)) {
-    return "normal_distribution";
-  }
-  if ([
-    "statistics",
-    "measures of central tendency and dispersion",
-    "statistical data representation and summary statistics",
-    "data representation",
-    "representation of data",
-    "summary statistics",
-    "measures of central tendency",
-    "dispersion",
-  ].includes(text)) {
-    return "statistics";
-  }
-  return normalizeGeneralTopic(text);
-}
-
-function normalizeP4Topic(text) {
-  if (text.startsWith("dynamics")) {
-    return "dynamics";
-  }
-  if (text.startsWith("kinematics") || text === "motion graphs") {
-    return "kinematics";
-  }
-  if (["momentum", "momentum impulse", "impulse"].includes(text)) {
-    return "momentum";
-  }
-  if (["work energy power", "work energy and power", "power and resistance", "energy"].includes(text)) {
-    return "work_energy_power";
-  }
-  if (text.includes("connected particles")) {
-    return "connected_particles";
-  }
-  if ([
-    "equilibrium particle",
-    "equilibrium of forces",
-    "equilibrium of coplanar forces",
-    "equilibrium coplanar forces",
-    "forces in equilibrium",
-  ].includes(text)) {
-    return "equilibrium";
-  }
-  if (["forces", "forces and newtons laws", "newtons laws of motion"].includes(text)) {
-    return "forces_newtons_laws";
-  }
-  if (["friction", "friction rough plane", "rough plane"].includes(text)) {
-    return "friction";
-  }
-
-  return normalizeGeneralTopic(text);
-}
-
-function normalizeGeneralTopic(text) {
-  if (["binomial expansion", "binomial theorem"].includes(text)) {
-    return "binomial_expansion";
-  }
-  if (["coordinate geometry", "circles", "equation of circle"].includes(text)) {
-    return "coordinate_geometry";
-  }
-  if (["quadratics", "quadratic equations", "discriminant"].includes(text)) {
-    return "quadratics";
-  }
-  if (["functions", "transformations", "graph transformations", "inverse functions", "composite functions"].includes(text)) {
-    return "functions";
-  }
-  if (["differentiation", "derivatives", "applications of differentiation"].includes(text)) {
-    return "differentiation";
-  }
-  if (["integration", "definite integration", "indefinite integration", "area under curve"].includes(text)) {
-    return "integration";
-  }
-  if (["trigonometry", "trigonometric equations", "trig identities"].includes(text)) {
-    return "trigonometry";
-  }
-  if (["series and sequences", "sequences and series", "arithmetic progression", "geometric progression"].includes(text)) {
-    return "series_sequences";
-  }
-  if (["logarithms and exponentials", "exponentials and logarithms", "logarithms", "exponentials"].includes(text)) {
-    return "logarithms_exponentials";
-  }
-  if (["vectors", "vector geometry"].includes(text)) {
-    return "vectors";
-  }
-  if (["complex numbers", "argand diagram"].includes(text)) {
-    return "complex_numbers";
-  }
-  if (["numerical methods", "iteration"].includes(text)) {
-    return "numerical_methods";
-  }
-  if (text === "differential equations") {
-    return "differential_equations";
-  }
-
-  if (["discrete random variables", "random variables", "probability distributions"].includes(text)) {
-    return "discrete_random_variables";
-  }
-  if (["probability", "conditional probability", "independent events"].includes(text)) {
-    return "probability";
-  }
-  if (["statistics", "descriptive statistics", "representation of data", "data representation"].includes(text)) {
-    return "statistics";
-  }
-  if (text === "binomial distribution") {
-    return "binomial_distribution";
-  }
-  if (text === "normal distribution") {
-    return "normal_distribution";
-  }
-  if (text === "hypothesis testing") {
-    return "hypothesis_testing";
-  }
-  if (["permutations and combinations", "combinations", "permutations"].includes(text)) {
-    return "permutations_combinations";
-  }
-
-  return normalizeKey(text);
-}
-
-function hasBoth(text, first, second) {
-  return text.includes(first) && text.includes(second);
+function topicRoutesFrom(topicData) {
+  if (topicData?.records && !Array.isArray(topicData.records)) {
+    return topicData.records;
+  }
+  return {};
 }
 
 function cleanTopicText(value) {
@@ -796,18 +600,18 @@ function cleanTopicText(value) {
 
 function normalizeKey(value) {
   const normalized = cleanTopicText(value).replace(/\s+/g, "_");
-  if (!normalized || normalized === "unknown") {
-    return "miscellaneous";
+  if (!normalized || normalized === "unknown" || normalized === "miscellaneous") {
+    return "";
   }
   return normalized;
 }
 
 function compareTopicKeys(a, b) {
-  if (a === "miscellaneous" && b !== "miscellaneous") {
-    return 1;
-  }
-  if (b === "miscellaneous" && a !== "miscellaneous") {
-    return -1;
+  const topics = topicTaxonomyFor(family);
+  const indexA = topics.findIndex((topic) => topic.key === a);
+  const indexB = topics.findIndex((topic) => topic.key === b);
+  if (indexA !== -1 && indexB !== -1) {
+    return indexA - indexB;
   }
   return formatTopic(a).localeCompare(formatTopic(b));
 }
@@ -853,17 +657,12 @@ function shuffle(items) {
 
 elements.paperSelect.addEventListener("change", () => {
   syncAllSelectCountLabels();
-  refreshDependentFilters({ resetTopic: true, resetDifficulty: true, resetMarks: true });
+  refreshDependentFilters({ resetTopic: true, resetMarks: true });
   resetPool({ randomize: false });
 });
 elements.topicSelect.addEventListener("change", () => {
   syncAllSelectCountLabels();
-  refreshDependentFilters({ resetDifficulty: true, resetMarks: true });
-  resetPool({ randomize: false });
-});
-elements.difficultySelect.addEventListener("change", () => {
-  syncAllSelectCountLabels();
-  populateMarksSelect();
+  refreshDependentFilters({ resetMarks: true });
   resetPool({ randomize: false });
 });
 elements.marksSelect.addEventListener("change", () => {
@@ -876,12 +675,12 @@ elements.nextQuestion.addEventListener("click", nextQuestion);
 elements.checkSolution.addEventListener("click", toggleSolution);
 
 Promise.all([
-  loadJson(`${dataRoot}/json/question_bank.json`),
-  loadJson(`${dataRoot}/json/question_bank.deepseek.json`, true),
-  loadJson(`${dataRoot}/json/image_availability.json`, true),
+  loadFirstJson([`${dataRoot}/question_bank.json`, `${dataRoot}/json/question_bank.json`]),
+  loadFirstJson([`${dataRoot}/question_bank.topic_routing.v1.json`, `${dataRoot}/json/question_bank.topic_routing.v1.json`], true),
+  imageAvailabilityPath ? loadJson(imageAvailabilityPath, true) : Promise.resolve(null),
 ])
-  .then(([bank, deepseek, imageAvailability]) => {
-    state.enrichments = deepseek?.enrichments || {};
+  .then(([bank, topicData, imageAvailability]) => {
+    state.topicRoutes = topicRoutesFrom(topicData);
     state.imageAvailability = imageAvailability;
     state.allQuestions = (bank.questions || [])
       .filter((record) => record.paper_family === family && hasImages(record))

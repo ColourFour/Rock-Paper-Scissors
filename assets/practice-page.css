@@ -47,7 +47,7 @@ select {
 
 .nav {
   display: grid;
-  grid-template-columns: auto minmax(180px, 1fr) repeat(4, minmax(130px, auto)) repeat(3, auto);
+  grid-template-columns: auto minmax(180px, 1fr) repeat(3, minmax(130px, auto)) repeat(3, auto);
   gap: 12px;
   align-items: center;
   width: min(1440px, calc(100% - 28px));
