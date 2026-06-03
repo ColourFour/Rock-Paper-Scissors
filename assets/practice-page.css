@@ -136,6 +136,12 @@ button:disabled {
   font-weight: 800;
 }
 
+.meta-button {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 14px;
+}
+
 .viewer {
   overflow: hidden;
   border: 1px solid var(--line);

@@ -10,6 +10,7 @@ const state = {
   index: 0,
   current: null,
   solutionVisible: false,
+  seenQuestionIds: [],
 };
 
 const elements = {
@@ -31,6 +32,9 @@ const elements = {
   currentQuestion: document.querySelector("#current-question"),
   currentTopic: document.querySelector("#current-topic"),
   currentMarks: document.querySelector("#current-marks"),
+  seenCount: document.querySelector("#seen-count"),
+  exportSeen: document.querySelector("#export-seen"),
+  clearSeen: document.querySelector("#clear-seen"),
   footerQuote: document.querySelector("#footer-quote"),
 };
 
@@ -424,6 +428,7 @@ function renderQuestion() {
   elements.currentQuestion.textContent = `Question: ${question.questionNumber}`;
   elements.currentTopic.textContent = `Topic: ${formatTopic(topicKeyFor(question))}`;
   elements.currentMarks.textContent = `Marks: ${formatMarksGroup(marksGroupFor(question))}`;
+  markQuestionSeen(question);
 }
 
 function renderEmpty(message) {
@@ -453,6 +458,261 @@ function setNavigationDisabled(disabled) {
   elements.previousQuestion.disabled = disabled;
   elements.randomQuestion.disabled = disabled;
   elements.nextQuestion.disabled = disabled;
+}
+
+function seenStorageKey() {
+  return `caie-math-review:seen:${family}:${localDateStamp()}`;
+}
+
+function localDateStamp(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function loadSeenQuestions() {
+  state.seenQuestionIds = readSeenQuestionIds().filter((id) => {
+    return state.allQuestions.some((question) => question.id === id);
+  });
+  updateSeenControls();
+}
+
+function readSeenQuestionIds() {
+  try {
+    const stored = window.localStorage.getItem(seenStorageKey());
+    const parsed = JSON.parse(stored || "[]");
+    return Array.isArray(parsed) ? parsed.filter((id) => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSeenQuestions() {
+  try {
+    window.localStorage.setItem(seenStorageKey(), JSON.stringify(state.seenQuestionIds));
+  } catch {
+    // The in-page list still works if browser storage is unavailable.
+  }
+}
+
+function markQuestionSeen(question) {
+  if (!question || state.seenQuestionIds.includes(question.id)) {
+    updateSeenControls();
+    return;
+  }
+  state.seenQuestionIds.push(question.id);
+  writeSeenQuestions();
+  updateSeenControls();
+}
+
+function seenQuestions() {
+  const questionsById = new Map(state.allQuestions.map((question) => [question.id, question]));
+  return state.seenQuestionIds.map((id) => questionsById.get(id)).filter(Boolean);
+}
+
+function updateSeenControls() {
+  const count = state.seenQuestionIds.length;
+  if (elements.seenCount) {
+    elements.seenCount.textContent = `Seen: ${count}`;
+  }
+  if (elements.exportSeen) {
+    elements.exportSeen.disabled = count === 0;
+  }
+  if (elements.clearSeen) {
+    elements.clearSeen.disabled = count === 0;
+  }
+}
+
+function clearSeenQuestions() {
+  if (!state.seenQuestionIds.length) {
+    return;
+  }
+  const shouldClear = window.confirm(`Clear today's seen list for ${familyTitle}?`);
+  if (!shouldClear) {
+    return;
+  }
+  state.seenQuestionIds = [];
+  if (state.current) {
+    state.seenQuestionIds.push(state.current.id);
+  }
+  writeSeenQuestions();
+  updateSeenControls();
+}
+
+function exportSeenQuestions() {
+  const questions = seenQuestions();
+  if (!questions.length) {
+    window.alert("No questions have been seen yet.");
+    return;
+  }
+
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) {
+    window.alert("Allow pop-ups for this site, then try exporting again.");
+    return;
+  }
+
+  const title = `${familyTitle} class review - ${localDateStamp()}`;
+  const exportHtml = buildSeenExportDocument(title, questions);
+
+  printWindow.document.open();
+  printWindow.document.write(exportHtml);
+  printWindow.document.close();
+}
+
+function buildSeenExportDocument(title, questions) {
+  const questionHtml = questions.map(exportQuestionHtml).join("");
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>${escapeHtml(title)}</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        color: #151711;
+        background: white;
+        font-family: "Avenir Next", "Gill Sans", "Trebuchet MS", sans-serif;
+      }
+
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 28px;
+      }
+
+      h1 {
+        margin: 0 0 4px;
+        font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+        font-size: 32px;
+      }
+
+      .summary {
+        margin: 0 0 28px;
+        color: #696452;
+        font-weight: 700;
+      }
+
+      article {
+        break-inside: avoid;
+        page-break-inside: avoid;
+        margin: 0 0 28px;
+        border-top: 2px solid #151711;
+        padding-top: 18px;
+      }
+
+      h2 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .meta {
+        margin: 0 0 14px;
+        color: #696452;
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      h3 {
+        margin: 16px 0 8px;
+        color: #083f3a;
+        font-size: 13px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      img {
+        display: block;
+        max-width: 100%;
+        height: auto;
+        border: 1px solid rgba(35, 30, 21, 0.18);
+      }
+
+      .actions {
+        position: sticky;
+        top: 0;
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        padding: 12px 0;
+        background: white;
+      }
+
+      button {
+        min-height: 40px;
+        border: 0;
+        border-radius: 999px;
+        background: #0d695f;
+        color: white;
+        cursor: pointer;
+        font: inherit;
+        font-weight: 900;
+        padding: 0 16px;
+      }
+
+      @media print {
+        main {
+          max-width: none;
+          padding: 0;
+        }
+
+        .actions {
+          display: none;
+        }
+
+        article {
+          margin-bottom: 20mm;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="actions">
+        <button type="button" onclick="window.print()">Save as PDF</button>
+      </div>
+      <h1>${escapeHtml(title)}</h1>
+      <p class="summary">${questions.length} seen ${questions.length === 1 ? "question" : "questions"} with mark schemes</p>
+      ${questionHtml}
+    </main>
+    <script>
+      window.addEventListener("load", () => {
+        setTimeout(() => window.print(), 250);
+      });
+    </script>
+  </body>
+</html>`;
+}
+
+function exportQuestionHtml(question, index) {
+  return `<article>
+    <h2>${index + 1}. ${escapeHtml(question.paper)} - Question ${escapeHtml(question.questionNumber)}</h2>
+    <p class="meta">Topic: ${escapeHtml(formatTopic(topicKeyFor(question)))} | Marks: ${escapeHtml(formatMarksGroup(marksGroupFor(question)))}</p>
+    <h3>Question</h3>
+    <img src="${escapeHtml(absoluteUrl(question.questionImage))}" alt="${escapeHtml(`${question.paper} question ${question.questionNumber}`)}">
+    <h3>Answer / mark scheme</h3>
+    <img src="${escapeHtml(absoluteUrl(question.markSchemeImage))}" alt="${escapeHtml(`${question.paper} mark scheme for question ${question.questionNumber}`)}">
+  </article>`;
+}
+
+function absoluteUrl(url) {
+  return new URL(url, window.location.href).href;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function topicKeyFor(question) {
@@ -673,6 +933,8 @@ elements.previousQuestion.addEventListener("click", previousQuestion);
 elements.randomQuestion.addEventListener("click", randomQuestion);
 elements.nextQuestion.addEventListener("click", nextQuestion);
 elements.checkSolution.addEventListener("click", toggleSolution);
+elements.exportSeen?.addEventListener("click", exportSeenQuestions);
+elements.clearSeen?.addEventListener("click", clearSeenQuestions);
 
 Promise.all([
   loadFirstJson([`${dataRoot}/question_bank.json`, `${dataRoot}/json/question_bank.json`]),
@@ -689,6 +951,7 @@ Promise.all([
     elements.title.textContent = compactFamilyTitle;
     populatePaperSelect();
     applyInitialFilters();
+    loadSeenQuestions();
     setFooterQuote();
     resetPool({ randomize: false });
   })
