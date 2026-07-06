@@ -887,11 +887,11 @@ function comparePaper(a, b) {
 }
 
 function parsePaper(paper) {
-  const match = String(paper).match(/^(\d+)(spring|summer|autumn)(\d+)$/);
+  const match = String(paper).match(/^(\d+)(spring|summer|autumn|winter)(\d+)$/);
   if (!match) {
     return { component: 999, season: 999, year: 999 };
   }
-  const seasonOrder = { spring: 1, summer: 2, autumn: 3 };
+  const seasonOrder = { spring: 1, summer: 2, autumn: 3, winter: 3 };
   return {
     component: Number(match[1]),
     season: seasonOrder[match[2]] || 999,
