@@ -18,6 +18,7 @@ const elements = {
   paperSelect: document.querySelector("#paper-select"),
   topicSelect: document.querySelector("#topic-select"),
   marksSelect: document.querySelector("#marks-select"),
+  difficultySelect: document.querySelector("#difficulty-select"),
   previousQuestion: document.querySelector("#previous-question"),
   randomQuestion: document.querySelector("#random-question"),
   nextQuestion: document.querySelector("#next-question"),
@@ -32,6 +33,7 @@ const elements = {
   currentQuestion: document.querySelector("#current-question"),
   currentTopic: document.querySelector("#current-topic"),
   currentMarks: document.querySelector("#current-marks"),
+  currentDifficulty: document.querySelector("#current-difficulty"),
   seenCount: document.querySelector("#seen-count"),
   exportSeen: document.querySelector("#export-seen"),
   clearSeen: document.querySelector("#clear-seen"),
@@ -206,6 +208,7 @@ const initialFilters = {
   paper: queryFilters.get("paper") || "all",
   topic: queryFilters.get("topic") || "all",
   marks: queryFilters.get("marks") || "all",
+  difficulty: queryFilters.get("difficulty") || "all",
 };
 const dataRoot = window.PRACTICE_DATA_ROOT || "../data/step-3";
 const imageAvailabilityPath = window.PRACTICE_IMAGE_AVAILABILITY_PATH || "";
@@ -248,6 +251,9 @@ function normalizeQuestion(record) {
     questionNumber: String(record.question_number),
     topic: record.topic || "unknown",
     marks: record.question_solution_marks,
+    topicDifficulty: record.topic_difficulty || null,
+    topicDifficultyRank: record.topic_difficulty_rank,
+    topicDifficultyPercentile: record.topic_difficulty_percentile_0_100,
     questionImage: imageUrl(record.question_image_path),
     markSchemeImage: imageUrl(record.mark_scheme_image_path),
   };
@@ -295,9 +301,20 @@ function questionsForSelection() {
   const selectedMarks = elements.marksSelect.value;
   const questions = questionsForPaperAndTopicSelection();
   if (selectedMarks === "all") {
+    return questionsForDifficultySelection(questions);
+  }
+  return questionsForDifficultySelection(questions.filter((question) => marksGroupFor(question) === selectedMarks));
+}
+
+function questionsForDifficultySelection(questions) {
+  if (!elements.difficultySelect) {
     return questions;
   }
-  return questions.filter((question) => marksGroupFor(question) === selectedMarks);
+  const selectedDifficulty = elements.difficultySelect.value;
+  if (selectedDifficulty === "all") {
+    return questions;
+  }
+  return questions.filter((question) => difficultyGroupFor(question) === selectedDifficulty);
 }
 
 function populatePaperSelect() {
@@ -356,6 +373,37 @@ function populateMarksSelect() {
   syncSelectCountLabels(elements.marksSelect);
 }
 
+function populateDifficultySelect() {
+  if (!elements.difficultySelect) {
+    return;
+  }
+  const previousValue = elements.difficultySelect.value;
+  const selectedMarks = elements.marksSelect.value;
+  let questions = questionsForPaperAndTopicSelection();
+  if (selectedMarks !== "all") {
+    questions = questions.filter((question) => marksGroupFor(question) === selectedMarks);
+  }
+  const difficultyCounts = countBy(questions, difficultyGroupFor);
+  const difficultyOptions = [
+    ["hard", "Hard"],
+    ["medium", "Medium"],
+    ["easy", "Easy"],
+    ["unranked", "Unranked"],
+  ].filter(([value]) => difficultyCounts.has(value));
+
+  elements.difficultySelect.innerHTML = "";
+  appendCountedOption(elements.difficultySelect, "all", "All difficulties", questions.length);
+  difficultyOptions.forEach(([value, label]) => {
+    appendCountedOption(elements.difficultySelect, value, label, difficultyCounts.get(value));
+  });
+
+  elements.difficultySelect.value =
+    previousValue === "all" || difficultyOptions.some(([value]) => value === previousValue)
+      ? previousValue
+      : "all";
+  syncSelectCountLabels(elements.difficultySelect);
+}
+
 function refreshDependentFilters({ resetTopic = false, resetMarks = false } = {}) {
   if (resetTopic) {
     elements.topicSelect.value = "all";
@@ -365,6 +413,7 @@ function refreshDependentFilters({ resetTopic = false, resetMarks = false } = {}
     elements.marksSelect.value = "all";
   }
   populateMarksSelect();
+  populateDifficultySelect();
 }
 
 function resetPool({ randomize = true } = {}) {
@@ -428,6 +477,9 @@ function renderQuestion() {
   elements.currentQuestion.textContent = `Question: ${question.questionNumber}`;
   elements.currentTopic.textContent = `Topic: ${formatTopic(topicKeyFor(question))}`;
   elements.currentMarks.textContent = `Marks: ${formatMarksGroup(marksGroupFor(question))}`;
+  if (elements.currentDifficulty) {
+    elements.currentDifficulty.textContent = `Difficulty: ${formatDifficultyGroup(difficultyGroupFor(question))}`;
+  }
   markQuestionSeen(question);
 }
 
@@ -694,7 +746,7 @@ function buildSeenExportDocument(title, questions) {
 function exportQuestionHtml(question, index) {
   return `<article>
     <h2>${index + 1}. ${escapeHtml(question.paper)} - Question ${escapeHtml(question.questionNumber)}</h2>
-    <p class="meta">Topic: ${escapeHtml(formatTopic(topicKeyFor(question)))} | Marks: ${escapeHtml(formatMarksGroup(marksGroupFor(question)))}</p>
+    <p class="meta">Topic: ${escapeHtml(formatTopic(topicKeyFor(question)))} | Marks: ${escapeHtml(formatMarksGroup(marksGroupFor(question)))} | Difficulty: ${escapeHtml(formatDifficultyGroup(difficultyGroupFor(question)))}</p>
     <h3>Question</h3>
     <img src="${escapeHtml(absoluteUrl(question.questionImage))}" alt="${escapeHtml(`${question.paper} question ${question.questionNumber}`)}">
     <h3>Answer / mark scheme</h3>
@@ -748,6 +800,28 @@ function marksGroupFor(question) {
   return String(marks);
 }
 
+function difficultyGroupFor(question) {
+  const percentile = topicDifficultyPercentileFor(question);
+  if (!Number.isFinite(percentile)) {
+    return "unranked";
+  }
+  if (percentile >= 67) {
+    return "hard";
+  }
+  if (percentile >= 33) {
+    return "medium";
+  }
+  return "easy";
+}
+
+function topicDifficultyPercentileFor(question) {
+  const routeDifficulty = state.topicRoutes[question.id]?.topic_difficulty || {};
+  const percentile = Number(
+    question.topicDifficultyPercentile ?? question.topicDifficulty?.difficulty_percentile_0_100 ?? routeDifficulty.difficulty_percentile_0_100,
+  );
+  return Number.isFinite(percentile) ? percentile : NaN;
+}
+
 function formatMarksGroup(group) {
   if (group === "12plus") {
     return "12+ marks";
@@ -756,6 +830,16 @@ function formatMarksGroup(group) {
     return "Miscellaneous";
   }
   return Number(group) === 1 ? "1 mark" : `${group} marks`;
+}
+
+function formatDifficultyGroup(group) {
+  const labels = {
+    hard: "Hard",
+    medium: "Medium",
+    easy: "Easy",
+    unranked: "Unranked",
+  };
+  return labels[group] || "Unranked";
 }
 
 function countBy(items, keyFor) {
@@ -777,6 +861,9 @@ function appendCountedOption(select, value, label, count) {
 }
 
 function syncSelectCountLabels(select) {
+  if (!select) {
+    return;
+  }
   [...select.options].forEach((option) => {
     const label = option.dataset.label || option.textContent;
     const count = option.dataset.count;
@@ -785,7 +872,7 @@ function syncSelectCountLabels(select) {
 }
 
 function syncAllSelectCountLabels() {
-  [elements.paperSelect, elements.topicSelect, elements.marksSelect].forEach(syncSelectCountLabels);
+  [elements.paperSelect, elements.topicSelect, elements.marksSelect, elements.difficultySelect].forEach(syncSelectCountLabels);
 }
 
 function applyInitialFilters() {
@@ -794,6 +881,8 @@ function applyInitialFilters() {
   setSelectValue(elements.topicSelect, normalizeInitialTopic(initialFilters.topic));
   populateMarksSelect();
   setSelectValue(elements.marksSelect, normalizeInitialMarks(initialFilters.marks));
+  populateDifficultySelect();
+  setSelectValue(elements.difficultySelect, normalizeInitialDifficulty(initialFilters.difficulty));
   syncAllSelectCountLabels();
 }
 
@@ -817,7 +906,18 @@ function normalizeInitialMarks(value) {
   return ["12plus", "miscellaneous"].includes(normalized) ? normalized : "miscellaneous";
 }
 
+function normalizeInitialDifficulty(value) {
+  if (value === "all") {
+    return "all";
+  }
+  const normalized = normalizeKey(value);
+  return ["hard", "medium", "easy", "unranked"].includes(normalized) ? normalized : "all";
+}
+
 function setSelectValue(select, value) {
+  if (!select) {
+    return;
+  }
   if ([...select.options].some((option) => option.value === value)) {
     select.value = value;
   }
@@ -828,6 +928,9 @@ function updateUrlParams() {
   setQueryParam(params, "paper", elements.paperSelect.value);
   setQueryParam(params, "topic", elements.topicSelect.value);
   setQueryParam(params, "marks", elements.marksSelect.value);
+  if (elements.difficultySelect) {
+    setQueryParam(params, "difficulty", elements.difficultySelect.value);
+  }
   const query = params.toString();
   const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
   window.history.replaceState(null, "", nextUrl);
@@ -926,6 +1029,11 @@ elements.topicSelect.addEventListener("change", () => {
   resetPool({ randomize: false });
 });
 elements.marksSelect.addEventListener("change", () => {
+  syncAllSelectCountLabels();
+  populateDifficultySelect();
+  resetPool({ randomize: false });
+});
+elements.difficultySelect?.addEventListener("change", () => {
   syncAllSelectCountLabels();
   resetPool({ randomize: false });
 });

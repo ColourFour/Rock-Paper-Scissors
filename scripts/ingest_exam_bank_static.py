@@ -7,7 +7,7 @@ import filecmp
 import json
 import re
 import shutil
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +28,21 @@ COURSE_BY_FAMILY = {
     "p3": ("p3", "Pure Mathematics 3"),
     "p4": ("m1", "Mechanics 1"),
     "p5": ("s1", "Probability & Statistics 1"),
+}
+TOPIC_ID_PREFIX_BY_FAMILY = {
+    "p1": "9709_p1_topic_",
+    "p3": "9709_p3_topic_",
+    "p4": "9709_m1_topic_",
+    "p5": "9709_s1_topic_",
+}
+TOPIC_PACKET_PRIMARY_REVIEW_STATUSES = {
+    "keep",
+    "keep_with_split_needed",
+    "relabel_primary",
+    "relabel_primary_add_secondary",
+}
+TOPIC_PACKET_SECONDARY_ONLY_REVIEW_STATUSES = {
+    "add_secondary_topic",
 }
 SESSION_BY_CODE = {
     "m": "spring",
@@ -104,6 +119,7 @@ def ingest(*, pipeline_root: Path, site_root: Path, dry_run: bool) -> dict[str, 
     pipeline_output = pipeline_root / "output"
     pipeline_bank_path = pipeline_root / "output" / "json" / "question_bank.json"
     pipeline_routes_path = pipeline_root / "data" / "topic_routing" / "question_bank.topic_routing.v1.json"
+    topic_packets_root = pipeline_root / "output" / "topic_packets"
     current_bank_path = data_root / "question_bank.json"
     current_routes_path = data_root / "question_bank.topic_routing.v1.json"
 
@@ -114,16 +130,22 @@ def ingest(*, pipeline_root: Path, site_root: Path, dry_run: bool) -> dict[str, 
 
     pipeline_routes = records_dict(pipeline_routes_payload)
     current_routes = records_dict(current_routes_payload)
+    topic_packet_assignments, topic_packet_summary = load_topic_packet_assignments(
+        topic_packets_root,
+        pipeline_root=pipeline_root,
+    )
 
     pipeline_prepared, duplicate_keys = prepare_pipeline_records(
         pipeline_bank.get("questions", []),
         pipeline_routes,
+        topic_packet_assignments=topic_packet_assignments,
         pipeline_output=pipeline_output,
         data_root=data_root,
     )
     current_prepared = prepare_current_records(
         current_bank.get("questions", []),
         current_routes,
+        topic_packet_assignments=topic_packet_assignments,
         data_root=data_root,
     )
 
@@ -168,6 +190,7 @@ def ingest(*, pipeline_root: Path, site_root: Path, dry_run: bool) -> dict[str, 
             pipeline_renderable_count=len(pipeline_renderable_by_key),
             retained_current_count=retained_current,
             final_renderable_count=sum(1 for prepared in ordered if has_both_static_paths(prepared.record)),
+            topic_packet_summary=topic_packet_summary,
             dry_run=dry_run,
         )
 
@@ -183,6 +206,7 @@ def ingest(*, pipeline_root: Path, site_root: Path, dry_run: bool) -> dict[str, 
             pipeline_renderable_count=len(pipeline_renderable_by_key),
             retained_current_count=retained_current,
             final_renderable_count=sum(1 for prepared in ordered if has_both_static_paths(prepared.record)),
+            topic_packet_summary=topic_packet_summary,
             dry_run=dry_run,
         )
 
@@ -203,6 +227,21 @@ def ingest(*, pipeline_root: Path, site_root: Path, dry_run: bool) -> dict[str, 
         for prepared in ordered
         if has_both_static_paths(prepared.record)
     )
+    topic_packet_applied = sum(
+        1
+        for prepared in ordered
+        if isinstance(prepared.record.get("notes"), dict)
+        and prepared.record["notes"].get("topic_packet_assignment_source")
+    )
+    topic_packet_difficulty_applied = sum(
+        1
+        for prepared in ordered
+        if prepared.record.get("topic_difficulty")
+        or (
+            isinstance(prepared.record.get("notes"), dict)
+            and prepared.record["notes"].get("topic_packet_difficulty")
+        )
+    )
     return {
         "mode": "dry-run" if dry_run else "apply",
         "pipeline_records_read": len(pipeline_bank.get("questions", [])),
@@ -216,6 +255,9 @@ def ingest(*, pipeline_root: Path, site_root: Path, dry_run: bool) -> dict[str, 
         "final_renderable_by_family": dict(sorted(by_family.items())),
         "final_renderable_by_source": dict(sorted(by_source.items())),
         "duplicate_pipeline_static_ids": duplicate_keys,
+        "topic_packet_summary": topic_packet_summary,
+        "topic_packet_assignments_applied": topic_packet_applied,
+        "topic_packet_difficulty_applied": topic_packet_difficulty_applied,
         "image_copy": copy_summary,
         **validation_summary,
     }
@@ -225,6 +267,7 @@ def prepare_pipeline_records(
     records: list[dict[str, Any]],
     routes: dict[str, dict[str, Any]],
     *,
+    topic_packet_assignments: dict[str, dict[str, Any]],
     pipeline_output: Path,
     data_root: Path,
 ) -> tuple[dict[str, PreparedRecord], list[str]]:
@@ -233,8 +276,10 @@ def prepare_pipeline_records(
     for record in records:
         if not isinstance(record, dict):
             continue
-        route = routes.get(str(record.get("question_id") or ""))
-        static_family = static_family_for(record, route)
+        source_question_id = str(record.get("question_id") or "")
+        route = routes.get(source_question_id)
+        topic_packet = topic_packet_assignment_for(topic_packet_assignments, source_question_id)
+        static_family = static_family_for(record, route, topic_packet)
         if static_family not in STATIC_FAMILIES:
             continue
         static_paper = static_paper_for(record)
@@ -269,8 +314,9 @@ def prepare_pipeline_records(
             normalized["notes"]["static_ingest_source_paper"] = record.get("paper")
             normalized["notes"]["static_ingest_source_question_image_path"] = q_rel_source
             normalized["notes"]["static_ingest_source_mark_scheme_image_path"] = ms_rel_source
+        apply_topic_packet_to_record(normalized, topic_packet)
 
-        normalized_route = normalize_route(route, static_id, static_paper, static_family, normalized)
+        normalized_route = normalize_route(route, static_id, static_paper, static_family, normalized, topic_packet)
         prepared = PreparedRecord(
             key=static_id,
             record=normalized,
@@ -299,6 +345,7 @@ def prepare_current_records(
     records: list[dict[str, Any]],
     routes: dict[str, dict[str, Any]],
     *,
+    topic_packet_assignments: dict[str, dict[str, Any]],
     data_root: Path,
 ) -> dict[str, PreparedRecord]:
     prepared: dict[str, PreparedRecord] = {}
@@ -319,7 +366,18 @@ def prepare_current_records(
         current["paper"] = text(current.get("paper")).replace("winter", "autumn")
         current["question_id"] = key.replace("winter", "autumn")
         current["paper_family"] = static_family_for_current(current)
-        route = normalize_route(routes.get(key), current["question_id"], current["paper"], current["paper_family"], current)
+        topic_packet = topic_packet_assignment_for(topic_packet_assignments, key)
+        if topic_packet and topic_packet.get("paper_family") != current["paper_family"]:
+            topic_packet = None
+        apply_topic_packet_to_record(current, topic_packet)
+        route = normalize_route(
+            routes.get(key),
+            current["question_id"],
+            current["paper"],
+            current["paper_family"],
+            current,
+            topic_packet,
+        )
         prepared[current["question_id"]] = PreparedRecord(
             key=current["question_id"],
             record=current,
@@ -330,7 +388,17 @@ def prepare_current_records(
     return prepared
 
 
-def static_family_for(record: dict[str, Any], route: dict[str, Any] | None) -> str:
+def static_family_for(
+    record: dict[str, Any],
+    route: dict[str, Any] | None,
+    topic_packet: dict[str, Any] | None = None,
+) -> str:
+    packet_family = text((topic_packet or {}).get("paper_family")).lower()
+    if packet_family in STATIC_FAMILIES:
+        return packet_family
+    route_packet_family = text((route or {}).get("packet_family")).lower()
+    if route_packet_family in STATIC_FAMILIES:
+        return route_packet_family
     route_family = text((route or {}).get("paper_family")).lower()
     if route_family in STATIC_FAMILIES:
         return route_family
@@ -408,16 +476,330 @@ def question_number_value(record: dict[str, Any], question_label: str) -> Any:
     return int(question_label[1:]) if question_label.startswith("q") and question_label[1:].isdigit() else question_label
 
 
+def load_topic_packet_assignments(
+    topic_packets_root: Path,
+    *,
+    pipeline_root: Path,
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    if not topic_packets_root.is_dir():
+        return {}, {
+            "available": False,
+            "topic_packets_root": str(topic_packets_root),
+            "manifest_count": 0,
+            "unique_question_count": 0,
+            "assignment_alias_count": 0,
+            "duplicate_question_count": 0,
+            "difficulty_record_count": 0,
+        }
+
+    candidates_by_question: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    manifest_count = 0
+    difficulty_record_count = 0
+    for manifest_path in sorted(topic_packets_root.rglob("manifest.json")):
+        manifest = read_json(manifest_path)
+        if manifest.get("schema_name") != "exam_bank.topic_packets":
+            continue
+        manifest_count += 1
+        assignment_status_by_id = {
+            str(entry.get("question_id")): entry
+            for entry in manifest.get("topic_assignment_confidence_trust_status", [])
+            if isinstance(entry, dict) and entry.get("question_id")
+        }
+        for included in manifest.get("included_records", []):
+            if not isinstance(included, dict) or not included.get("question_id"):
+                continue
+            assignment_status = assignment_status_by_id.get(str(included.get("question_id")), {})
+            candidate = topic_packet_candidate(
+                manifest,
+                included,
+                assignment_status,
+                manifest_path=manifest_path,
+                pipeline_root=pipeline_root,
+            )
+            if candidate.get("topic_difficulty"):
+                difficulty_record_count += 1
+            candidates_by_question[str(included["question_id"])].append(candidate)
+
+    selected_by_question: dict[str, dict[str, Any]] = {}
+    duplicate_questions: list[str] = []
+    for question_id, candidates in candidates_by_question.items():
+        if len(candidates) > 1:
+            duplicate_questions.append(question_id)
+        selected = max(candidates, key=topic_packet_candidate_sort_key)
+        selected = copy.deepcopy(selected)
+        selected["all_packet_placements"] = [
+            topic_packet_placement_summary(candidate)
+            for candidate in sorted(candidates, key=topic_packet_candidate_sort_key, reverse=True)
+        ]
+        selected["secondary_topic_ids"] = unique_texts(
+            [
+                *selected.get("secondary_topic_ids", []),
+                *[
+                    candidate.get("topic_id")
+                    for candidate in candidates
+                    if candidate is not selected
+                    and candidate.get("topic_overlap_review_status") in TOPIC_PACKET_SECONDARY_ONLY_REVIEW_STATUSES
+                ],
+            ]
+        )
+        selected["coverage_topic_ids"] = unique_texts(
+            [
+                *selected.get("coverage_topic_ids", []),
+                *[
+                    candidate.get("topic_id")
+                    for candidate in candidates
+                    if candidate.get("topic_overlap_review_status") in TOPIC_PACKET_SECONDARY_ONLY_REVIEW_STATUSES
+                ],
+            ]
+        )
+        selected_by_question[question_id] = selected
+
+    assignments: dict[str, dict[str, Any]] = {}
+    for question_id, assignment in selected_by_question.items():
+        for alias in question_id_aliases(question_id):
+            assignments[alias] = assignment
+
+    return assignments, {
+        "available": True,
+        "topic_packets_root": str(topic_packets_root),
+        "manifest_count": manifest_count,
+        "unique_question_count": len(selected_by_question),
+        "assignment_alias_count": len(assignments),
+        "duplicate_question_count": len(duplicate_questions),
+        "duplicate_question_examples": sorted(duplicate_questions)[:20],
+        "difficulty_record_count": difficulty_record_count,
+        "selection_sources": dict(
+            sorted(
+                Counter(
+                    text(assignment.get("assignment_source")) or "unknown"
+                    for assignment in selected_by_question.values()
+                ).items()
+            )
+        ),
+    }
+
+
+def topic_packet_candidate(
+    manifest: dict[str, Any],
+    included: dict[str, Any],
+    assignment_status: dict[str, Any],
+    *,
+    manifest_path: Path,
+    pipeline_root: Path,
+) -> dict[str, Any]:
+    try:
+        manifest_rel = str(manifest_path.relative_to(pipeline_root))
+    except ValueError:
+        manifest_rel = str(manifest_path)
+    paper_family = text(manifest.get("paper_family")).lower()
+    topic_id = text(included.get("primary_topic_id") or manifest.get("topic_id"))
+    topic_difficulty = included.get("topic_difficulty")
+    return {
+        "question_id": text(included.get("question_id")),
+        "paper_family": paper_family,
+        "topic_id": topic_id,
+        "topic_label": text(manifest.get("topic_label")),
+        "packet_topic_id": text(manifest.get("topic_id")),
+        "packet_topic_label": text(manifest.get("topic_label")),
+        "packet_id": f"{paper_family}_{text(manifest.get('topic_id'))}",
+        "packet_section": text(included.get("section")),
+        "review_reasons": list_values(included.get("review_reasons")),
+        "warnings": list_values(included.get("warnings")),
+        "secondary_topic_ids": list_values(included.get("secondary_topic_ids")),
+        "coverage_topic_ids": list_values(included.get("coverage_topic_ids")),
+        "topic_count_policy": text(included.get("topic_count_policy")),
+        "assignment_source": text(assignment_status.get("source")),
+        "assignment_confidence": assignment_status.get("confidence"),
+        "assignment_trust_status": text(assignment_status.get("trust_status")),
+        "strict_release_safe": assignment_status.get("strict_release_safe"),
+        "topic_overlap_review_status": text(assignment_status.get("topic_overlap_review_status")),
+        "topic_overlap_review_rationale": text(included.get("topic_overlap_review_rationale")),
+        "topic_overlap_review_source": text(included.get("topic_overlap_review_source")),
+        "review_decision_action": text(included.get("review_decision_action")),
+        "review_decision_source": text(included.get("review_decision_source")),
+        "review_status_marker": text(included.get("review_status_marker")),
+        "current_syllabus_status": text(included.get("current_syllabus_status")),
+        "release_override": included.get("release_override"),
+        "problem_number": included.get("problem_number"),
+        "source_label": text(included.get("source_label")),
+        "manifest_path": manifest_rel,
+        "manifest_generated_at": text(manifest.get("generated_at")),
+        "topic_difficulty": copy.deepcopy(topic_difficulty) if isinstance(topic_difficulty, dict) else None,
+    }
+
+
+def topic_packet_candidate_sort_key(candidate: dict[str, Any]) -> tuple[int, str, str, str]:
+    return (
+        topic_packet_candidate_score(candidate),
+        text(candidate.get("manifest_generated_at")),
+        text(candidate.get("paper_family")),
+        text(candidate.get("topic_id")),
+    )
+
+
+def topic_packet_candidate_score(candidate: dict[str, Any]) -> int:
+    source = text(candidate.get("assignment_source"))
+    status = text(candidate.get("topic_overlap_review_status"))
+    if source == "topic_overlap_review" and status in TOPIC_PACKET_PRIMARY_REVIEW_STATUSES:
+        return 60
+    if source == "reviewed_topic_bank":
+        return 50
+    if source == "question_bank_major_topic" and status in TOPIC_PACKET_PRIMARY_REVIEW_STATUSES:
+        return 40
+    if source == "question_bank_major_topic":
+        return 30
+    if source == "topic_overlap_review" and status in TOPIC_PACKET_SECONDARY_ONLY_REVIEW_STATUSES:
+        return 20
+    if source == "topic_overlap_review":
+        return 10
+    return 0
+
+
+def topic_packet_placement_summary(candidate: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "paper_family": candidate.get("paper_family"),
+        "topic_id": candidate.get("topic_id"),
+        "packet_section": candidate.get("packet_section"),
+        "assignment_source": candidate.get("assignment_source"),
+        "topic_overlap_review_status": candidate.get("topic_overlap_review_status"),
+        "manifest_path": candidate.get("manifest_path"),
+    }
+
+
+def topic_packet_assignment_for(
+    assignments: dict[str, dict[str, Any]],
+    question_id: str,
+) -> dict[str, Any] | None:
+    for alias in question_id_aliases(question_id):
+        assignment = assignments.get(alias)
+        if assignment is not None:
+            return assignment
+    return None
+
+
+def question_id_aliases(question_id: str) -> list[str]:
+    aliases = [text(question_id)]
+    if "winter" in question_id:
+        aliases.append(question_id.replace("winter", "autumn"))
+    if "autumn" in question_id:
+        aliases.append(question_id.replace("autumn", "winter"))
+    return unique_texts(aliases)
+
+
+def apply_topic_packet_to_record(record: dict[str, Any], topic_packet: dict[str, Any] | None) -> None:
+    if not topic_packet:
+        return
+    record["topic"] = topic_packet.get("topic_id") or record.get("topic")
+    difficulty = topic_packet.get("topic_difficulty")
+    if isinstance(difficulty, dict):
+        record["topic_difficulty"] = copy.deepcopy(difficulty)
+        record["topic_difficulty_rank"] = difficulty.get("packet_rank")
+        record["topic_difficulty_percentile_0_100"] = difficulty.get("difficulty_percentile_0_100")
+        record["topic_visual_difficulty_score_0_100"] = difficulty.get("visual_difficulty_score_0_100")
+        record["topic_difficulty_confidence"] = difficulty.get("confidence")
+    record.setdefault("notes", {})
+    if not isinstance(record["notes"], dict):
+        record["notes"] = {}
+    notes = record["notes"]
+    notes["topic_packet_assignment_source"] = topic_packet.get("assignment_source")
+    notes["topic_packet_assignment_confidence"] = topic_packet.get("assignment_confidence")
+    notes["topic_packet_assignment_trust_status"] = topic_packet.get("assignment_trust_status")
+    notes["topic_packet_family"] = topic_packet.get("paper_family")
+    notes["topic_packet_topic_id"] = topic_packet.get("topic_id")
+    notes["topic_packet_topic_label"] = topic_packet.get("topic_label")
+    notes["topic_packet_section"] = topic_packet.get("packet_section")
+    notes["topic_packet_review_reasons"] = list_values(topic_packet.get("review_reasons"))
+    notes["topic_packet_secondary_topic_ids"] = list_values(topic_packet.get("secondary_topic_ids"))
+    notes["topic_packet_coverage_topic_ids"] = list_values(topic_packet.get("coverage_topic_ids"))
+    notes["topic_packet_all_placements"] = list_values(topic_packet.get("all_packet_placements"))
+    notes["topic_packet_manifest_path"] = topic_packet.get("manifest_path")
+    notes["topic_overlap_review_status"] = topic_packet.get("topic_overlap_review_status")
+    if isinstance(difficulty, dict):
+        notes["topic_packet_difficulty"] = copy.deepcopy(difficulty)
+
+
+def apply_topic_packet_to_route(route: dict[str, Any], topic_packet: dict[str, Any] | None) -> None:
+    if not topic_packet:
+        return
+    packet_family = text(topic_packet.get("paper_family")).lower()
+    packet_topic = text(topic_packet.get("topic_id"))
+    canonical_topic = canonical_topic_id(packet_family, packet_topic)
+    route["primary_topic_id"] = canonical_topic or packet_topic
+    route["topic_distribution"] = [{"topic_id": route["primary_topic_id"], "fit_percent": 100}]
+    if topic_packet.get("assignment_confidence") not in (None, ""):
+        route["confidence"] = topic_packet.get("assignment_confidence")
+    route["review_required"] = (
+        topic_packet.get("packet_section") == "review_required"
+        or bool(topic_packet.get("review_reasons"))
+        or bool(route.get("review_required"))
+    )
+    route["review_reasons"] = unique_texts(
+        [
+            *list_values(route.get("review_reasons")),
+            *list_values(topic_packet.get("review_reasons")),
+            *list_values(topic_packet.get("warnings")),
+        ]
+    )
+    route["routing_source"] = "topic_packet_manifest"
+    if topic_packet.get("manifest_generated_at"):
+        route["routing_refreshed_at"] = topic_packet["manifest_generated_at"]
+    route["packet_family"] = packet_family
+    route["packet_topic_id"] = packet_topic
+    route["packet_topic_label"] = topic_packet.get("topic_label")
+    route["raw_topic"] = packet_topic
+    route["normalization_status"] = "resolved"
+    route["normalization_reason"] = topic_packet.get("assignment_source") or "topic_packet_manifest"
+    route["topic_packet_manifest_path"] = topic_packet.get("manifest_path")
+    route["topic_packet_section"] = topic_packet.get("packet_section")
+    route["topic_packet_assignment_source"] = topic_packet.get("assignment_source")
+    route["topic_packet_assignment_confidence"] = topic_packet.get("assignment_confidence")
+    route["topic_packet_assignment_trust_status"] = topic_packet.get("assignment_trust_status")
+    route["topic_overlap_review_status"] = topic_packet.get("topic_overlap_review_status")
+    route["packet_secondary_topic_ids"] = list_values(topic_packet.get("secondary_topic_ids"))
+    route["packet_coverage_topic_ids"] = list_values(topic_packet.get("coverage_topic_ids"))
+    route["all_packet_placements"] = list_values(topic_packet.get("all_packet_placements"))
+    difficulty = topic_packet.get("topic_difficulty")
+    if isinstance(difficulty, dict):
+        route["topic_difficulty"] = copy.deepcopy(difficulty)
+
+
+def canonical_topic_id(paper_family: str, topic_id: str) -> str:
+    prefix = TOPIC_ID_PREFIX_BY_FAMILY.get(text(paper_family).lower())
+    topic = normalize_topic_id(topic_id)
+    return f"{prefix}{topic}" if prefix and topic else ""
+
+
+def normalize_topic_id(topic_id: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", text(topic_id).lower()).strip("_")
+
+
+def list_values(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def unique_texts(values: list[Any]) -> list[Any]:
+    seen: set[str] = set()
+    unique: list[Any] = []
+    for value in values:
+        key = json.dumps(value, sort_keys=True) if isinstance(value, (dict, list)) else text(value)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(value)
+    return unique
+
+
 def normalize_route(
     route: dict[str, Any] | None,
     static_id: str,
     static_paper: str,
     static_family: str,
     record: dict[str, Any],
+    topic_packet: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    if route is None:
+    if route is None and topic_packet is None:
         return None
-    normalized = copy.deepcopy(route)
+    normalized = copy.deepcopy(route) if route is not None else {}
     normalized["paper"] = static_paper
     normalized["paper_family"] = static_family
     normalized["packet_family"] = static_family
@@ -428,6 +810,15 @@ def normalize_route(
     if component_name:
         normalized["component_name"] = component_name
     normalized["static_question_id"] = static_id
+    apply_topic_packet_to_route(normalized, topic_packet)
+    if not normalized.get("primary_topic_id"):
+        fallback_topic = text(record.get("topic"))
+        if fallback_topic:
+            normalized["primary_topic_id"] = fallback_topic
+            normalized["topic_distribution"] = [{"topic_id": fallback_topic, "fit_percent": 100}]
+            normalized["routing_source"] = normalized.get("routing_source") or "record_topic_fallback"
+            normalized["normalization_status"] = normalized.get("normalization_status") or "fallback"
+            normalized["normalization_reason"] = normalized.get("normalization_reason") or "record_topic"
     return normalized
 
 
@@ -531,6 +922,7 @@ def ingest_metadata(
     pipeline_renderable_count: int,
     retained_current_count: int,
     final_renderable_count: int,
+    topic_packet_summary: dict[str, Any],
     dry_run: bool,
 ) -> dict[str, Any]:
     return {
@@ -543,6 +935,7 @@ def ingest_metadata(
         "pipeline_renderable_count": pipeline_renderable_count,
         "retained_existing_renderable_count": retained_current_count,
         "final_renderable_count": final_renderable_count,
+        "topic_packet_summary": topic_packet_summary,
     }
 
 
