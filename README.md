@@ -15,6 +15,7 @@ The extraction pipeline now lives in the newer `exam-bank` project. Future updat
 - `index.html` is the public landing page.
 - `assets/` contains the artwork directly used by the landing page.
 - `p1/`, `p3/`, `p4/`, and `p5/` are static practice pages.
+- `proof-court/` contains the Court of Proof introductory proof game.
 - `data/step-3/question_bank.json` contains exported question metadata copied from the newer exam-bank project.
 - `data/step-3/question_bank.topic_routing.v1.json` contains the current keyed topic-routing sidecar.
 - `data/step-3/p1/`, `data/step-3/p3/`, `data/step-3/p4/`, and `data/step-3/p5/` contain exported question and mark-scheme PNGs.
@@ -31,6 +32,7 @@ p1/index.html
 p3/index.html
 p4/index.html
 p5/index.html
+proof-court/index.html
 data/step-3/question_bank.json
 data/step-3/question_bank.topic_routing.v1.json
 data/step-3/p1/

@@ -36,7 +36,7 @@ jobs:
           if [ -d assets ]; then
             cp -R assets _site/assets
           fi
-          for page_dir in p1 p3 p4 p5 data; do
+          for page_dir in p1 p3 p4 p5 proof-court data; do
             if [ -d "$page_dir" ]; then
               cp -R "$page_dir" _site/
             fi
