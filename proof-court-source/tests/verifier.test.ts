@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { cases, objectionCategories, type ProofCase } from '../lib/cases.ts';
-import { friendlyExplanation, validateEvidenceValue, verifyStructuredProof, type Submission } from '../lib/verifier.ts';
+import { friendlyExplanation, isEvidenceReady, validateEvidenceValue, verifyStructuredProof, type Submission } from '../lib/verifier.ts';
 
 function validEvidence(caseFile: ProofCase) {
+  if (caseFile.id === 'audit-examples') return 40;
   if (caseFile.requiredEvidence !== undefined) return caseFile.requiredEvidence;
   if (caseFile.evidenceRange?.min !== undefined) return caseFile.evidenceRange.min;
   if (caseFile.evidenceKind === 'positive-natural') return 2;
@@ -58,6 +59,43 @@ void test('audit cases enforce decisive evidence before accepting an objection',
   const result = verifyStructuredProof(caseFile, submission);
   assert.equal(result.accepted, false);
   assert.equal(result.heading, 'The court needs a decisive witness');
+});
+
+void test('prime-pattern witnesses use actual factors, not a fixed answer', () => {
+  const caseFile = cases.find((item) => item.id === 'audit-examples')!;
+  for (const n of [40, 41, 44, 81, 1_000_000]) {
+    const evidence = caseFile.evidenceGenerator(n);
+    assert.equal(evidence.counterexample, true, `n = ${n}`);
+    const factors = evidence.result.match(/= (\d+) × (\d+)/)!;
+    assert.ok(factors, evidence.result);
+    assert.equal(Number(factors[1]) * Number(factors[2]), n * n + n + 41);
+    assert.ok(Number(factors[1]) > 1 && Number(factors[2]) > 1);
+    assert.equal(isEvidenceReady(caseFile, n), true);
+    assert.equal(verifyStructuredProof(caseFile, { ...validSubmission(caseFile), evidenceValue: n }).accepted, true);
+  }
+  for (const n of [0, 1, 39, 42]) {
+    assert.equal(caseFile.evidenceGenerator(n).counterexample, false);
+    assert.equal(isEvidenceReady(caseFile, n), false);
+    assert.equal(verifyStructuredProof(caseFile, { ...validSubmission(caseFile), evidenceValue: n }).accepted, false);
+  }
+  for (const n of [null, -1, 1.5, NaN, Infinity, 1_000_001, Number.MAX_SAFE_INTEGER]) {
+    assert.equal(isEvidenceReady(caseFile, n), false);
+    assert.equal(verifyStructuredProof(caseFile, { ...validSubmission(caseFile), evidenceValue: n }).accepted, false);
+  }
+  assert.equal(verifyStructuredProof(caseFile, { ...validSubmission(caseFile), evidenceValue: 41, auditLine: 2 }).accepted, false);
+  assert.equal(verifyStructuredProof(caseFile, { ...validSubmission(caseFile), evidenceValue: 41, objection: 'converse error' }).accepted, false);
+});
+
+void test('prime-pattern classification agrees with an independent sieve for n = 0…1000', () => {
+  const caseFile = cases.find((item) => item.id === 'audit-examples')!;
+  const limit = 1000 * 1000 + 1000 + 41;
+  const composite = new Uint8Array(limit + 1);
+  for (let p = 2; p * p <= limit; p++) {
+    if (!composite[p]) for (let multiple = p * p; multiple <= limit; multiple += p) composite[multiple] = 1;
+  }
+  for (let n = 0; n <= 1000; n++) {
+    assert.equal(caseFile.evidenceGenerator(n).counterexample, Boolean(composite[n * n + n + 41]), `n = ${n}`);
+  }
 });
 
 void test('the selected proof strategy must match the authored route', () => {

@@ -74,9 +74,30 @@ export type ProofCase = {
   facts: { label: string; value: string; detail: string; state: 'given' | 'derived' | 'goal' }[];
   lesson: string;
   requiredEvidence?: number;
+  requiresCounterexample?: boolean;
 };
 
 const divides = (a: number, b: number) => b % a === 0;
+
+// Bounded trial division keeps every calculation exact and the browser responsive.
+// This is a numerical counterexample check, not formal proof verification.
+function primePatternEvidence(n: number) {
+  if (!Number.isSafeInteger(n) || n < 0 || n > 1_000_000) {
+    return { result: 'Enter a whole number from 0 to 1,000,000. This is the lab’s calculation limit, not a restriction on the claim.', counterexample: false };
+  }
+  const value = n * n + n + 41;
+  // n(n + 1) is even, so the output is odd. Every composite has a
+  // factor no greater than its square root; checking odd factors suffices.
+  for (let factor = 3; factor * factor <= value; factor += 2) {
+    if (value % factor === 0) {
+      return {
+        result: `At n = ${n}, n² + n + 41 = ${value} = ${factor} × ${value / factor}. Both factors are greater than 1, so the result is composite. Since ${n} is a natural number, this is a valid counterexample.`,
+        counterexample: true,
+      };
+    }
+  }
+  return { result: `At n = ${n}, n² + n + 41 = ${value}, which is prime. This value supports the pattern, but does not prove it for every natural number. Try another value.`, counterexample: false };
+}
 
 const coreCases: ProofCase[] = [
   {
@@ -379,13 +400,15 @@ const coreCases: ProofCase[] = [
     ],
     allowedStrategies: ['Object to opposing counsel'],
     evidenceKind: 'natural',
-    evidencePrompt: 'Search for a natural number that breaks the pattern.',
+    evidencePrompt: 'Search for a natural number that breaks the pattern. The lab can test 0 to 1,000,000; the claim concerns all natural numbers.',
+    evidenceRange: { min: 0, max: 1_000_000 },
+    requiresCounterexample: true,
     scaffoldLevel: 'independent',
     claimQuestions: [
       { id: 'status', prompt: 'After checking only n = 0, 1, 2, 3, and 4, what do we have?', options: ['A conjecture supported by evidence', 'A completed universal proof', 'A mathematical definition'], answer: 'A conjecture supported by evidence', explanation: 'A pattern can motivate a conjecture, but checked cases do not prove it.' },
       { id: 'quantifier', prompt: 'What would defeat this universal claim?', options: ['One natural number with a composite output', 'Five natural numbers with prime outputs', 'A new formula with the same first values'], answer: 'One natural number with a composite output', explanation: 'One failed case disproves a universal claim.' },
     ],
-    evidenceGenerator: (n) => { const v = n * n + n + 41; return { result: `At n = ${n}, the expression is ${v}. ${n === 40 ? 'This equals 41 × 41, so it is not prime.' : 'One result cannot settle a universal claim.'}`, counterexample: n === 40 }; },
+    evidenceGenerator: primePatternEvidence,
     proofTemplate: {
       mode: 'audit',
       instruction: 'Select the first faulty line and the exact objection category.',
@@ -407,7 +430,6 @@ const coreCases: ProofCase[] = [
       { label: 'Your duty', value: 'Object precisely', detail: 'Line + category', state: 'goal' },
     ],
     lesson: 'Many confirming examples still do not prove a universal statement.',
-    requiredEvidence: 40,
   },
   {
     id: 'audit-converse',

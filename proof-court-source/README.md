@@ -39,6 +39,10 @@ Add one `ProofCase` object to `cases` in `lib/cases.ts`.
 10. For advanced cases, add four `explanationFields`: assumption, inference, justification, and conclusion. Each field lists the mathematical concepts required in the response.
 11. Include the intended `leanTheorem` and `leanProof`, even though this MVP does not execute them.
 
+For an open counterexample search, set `requiresCounterexample: true`. Both the evidence screen and submission checker use `isEvidenceReady`, which validates the input and requires the evidence generator to return `counterexample: true`. Reserve `requiredEvidence` for arguments whose blocks explicitly use a particular witness.
+
+The prime-pattern audit checks `n² + n + 41` by exact trial division for natural inputs from 0 through 1,000,000. Every composite output is accepted with a nontrivial factorisation; prime outputs do not unlock the argument. The range is a browser calculation limit, not a restriction of the universal claim. This numerical check does not run Lean. Students must still identify the faulty proof line and objection category.
+
 ## Verification: honest MVP status
 
 Lean 4 is **not running in this deployment**. The introduction, header, and every verdict clearly label results as coming from the “Structured proof checker · Lean theorem prepared, not executed.” The fallback checker validates:

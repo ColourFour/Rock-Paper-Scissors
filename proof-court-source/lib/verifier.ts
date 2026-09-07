@@ -38,6 +38,15 @@ export function validateEvidenceValue(caseFile: ProofCase, value: number | null)
   return null;
 }
 
+// Shared by the evidence screen and verdict checker so a valid witness opens
+// the argument and is rechecked when the student submits their objection.
+export function isEvidenceReady(caseFile: ProofCase, value: number | null): boolean {
+  if (validateEvidenceValue(caseFile, value) !== null) return false;
+  if (caseFile.requiredEvidence !== undefined && value !== caseFile.requiredEvidence) return false;
+  if (caseFile.requiresCounterexample) return value !== null && caseFile.evidenceGenerator(value).counterexample;
+  return true;
+}
+
 export function verifyStructuredProof(caseFile: ProofCase, submission: Submission): Verdict {
   const unanswered = (caseFile.claimQuestions ?? []).find((question) => submission.claimAnswers[question.id] !== question.answer);
   if (unanswered) {
@@ -55,7 +64,7 @@ export function verifyStructuredProof(caseFile: ProofCase, submission: Submissio
     return { accepted: false, heading: 'Evidence outside the case', message: evidenceError, objection: 'missing domain', engine };
   }
 
-  if (caseFile.requiredEvidence !== undefined && submission.evidenceValue !== caseFile.requiredEvidence) {
+  if (!isEvidenceReady(caseFile, submission.evidenceValue)) {
     return {
       accepted: false,
       heading: 'The court needs a decisive witness',

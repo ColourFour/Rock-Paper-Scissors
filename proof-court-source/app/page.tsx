@@ -23,7 +23,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { cases, objectionCategories, type ProofCase } from '@/lib/cases';
-import { validateEvidenceValue, verifyStructuredProof, type Verdict } from '@/lib/verifier';
+import { isEvidenceReady, validateEvidenceValue, verifyStructuredProof, type Verdict } from '@/lib/verifier';
 
 type ProgressState = {
   version: 2;
@@ -165,7 +165,7 @@ export default function Home() {
   }
 
   function testEvidence() {
-    const value = Number(evidenceInput);
+    const value = evidenceInput.trim() === '' ? NaN : Number(evidenceInput);
     const error = validateEvidenceValue(caseFile, Number.isFinite(value) ? value : null);
     if (error) {
       setEvidenceValue(null);
@@ -392,8 +392,8 @@ function ClaimStep({ caseFile, plainEnglish, setPlainEnglish, answers, answerCla
 }
 
 function EvidenceStep({ caseFile, evidenceInput, setEvidenceInput, evidenceValue, evidenceResult, testEvidence, onBack, onContinue }: { caseFile: ProofCase; evidenceInput: string; setEvidenceInput: (value: string) => void; evidenceValue: number | null; evidenceResult: string; testEvidence: () => void; onBack: () => void; onContinue: () => void }) {
-  const decisiveReady = caseFile.requiredEvidence === undefined || evidenceValue === caseFile.requiredEvidence;
-  const ready = evidenceValue !== null && decisiveReady;
+  const ready = evidenceValue !== null && isEvidenceReady(caseFile, evidenceValue);
+  const needsCounterexample = caseFile.requiredEvidence !== undefined || caseFile.requiresCounterexample;
   return (
     <section className="paper-card mx-auto max-w-3xl p-5 sm:p-7">
       <div className="mx-auto max-w-xl text-center"><span className="mx-auto grid size-10 place-items-center rounded-full bg-[#eaddbd] text-[#765719]"><FlaskConical className="size-5" /></span><p className="mt-4 eyebrow">Evidence lab</p><h2 className="mt-1 font-heading text-2xl font-semibold">Investigate one valid case</h2><p className="mt-2 text-sm leading-relaxed text-[#6c6559]">{caseFile.evidencePrompt ?? 'Try one value from the stated domain.'}</p></div>
@@ -402,7 +402,7 @@ function EvidenceStep({ caseFile, evidenceInput, setEvidenceInput, evidenceValue
         {evidenceResult && <output className={`mt-4 block rounded-xl border p-4 text-sm leading-relaxed ${evidenceValue === null ? 'border-[#d5a08f] bg-[#fff0e9] text-[#794238]' : 'border-[#b8cdbb] bg-[#edf4ea] text-[#344b40]'}`}>{evidenceResult}</output>}
         <p className="mt-3 text-xs leading-relaxed text-[#776f61]"><strong>Evidence is not proof:</strong> examples help you investigate. One counterexample can defeat “every,” but supporting examples cannot establish “every.”</p>
       </div>
-      <div className="mt-7 flex items-center justify-between gap-3 border-t border-[#e1d8c6] pt-5"><Button variant="ghost" onClick={onBack}><ArrowLeft /> Back</Button><div className="text-right"><Button onClick={onContinue} disabled={!ready} className="h-10 bg-[#173b36] px-5 text-white">Continue to argument <ArrowRight /></Button>{!ready && caseFile.requiredEvidence !== undefined && <p className="mt-1.5 text-[11px] text-[#8a6a2e]">Find the decisive counterexample first.</p>}</div></div>
+      <div className="mt-7 flex items-center justify-between gap-3 border-t border-[#e1d8c6] pt-5"><Button variant="ghost" onClick={onBack}><ArrowLeft /> Back</Button><div className="text-right"><Button onClick={onContinue} disabled={!ready} className="h-10 bg-[#173b36] px-5 text-white">Continue to argument <ArrowRight /></Button>{!ready && needsCounterexample && <p className="mt-1.5 text-[11px] text-[#8a6a2e]">Find the decisive counterexample first.</p>}</div></div>
     </section>
   );
 }
